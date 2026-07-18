@@ -1,0 +1,852 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>milltender</title>
+<style>
+  :root {
+    color-scheme: light;
+    --surface: #fcfcfb; --page: #f9f9f7;
+    --ink-1: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+    --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,0.10);
+    --speed: #2a78d6; --hr: #e34948; --hrv: #008300;
+    --critical: #d03b3b; --good: #0ca30c; --warning: #fab219;
+    --shadow: 0 1px 2px rgba(11,11,11,0.04), 0 4px 16px rgba(11,11,11,0.04);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --surface: #1a1a19; --page: #0d0d0d;
+      --ink-1: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+      --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10);
+      --speed: #3987e5; --hr: #e66767; --hrv: #008300;
+      --shadow: none;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--page); color: var(--ink-1);
+    max-width: 560px; margin: 0 auto; padding: 16px 14px 28px;
+  }
+
+  header { display: flex; align-items: baseline; gap: 10px; padding: 2px 2px 14px; }
+  header h1 { font-size: 17px; font-weight: 700; letter-spacing: -0.01em; }
+  header .sub { font-size: 12px; color: var(--muted); flex: 1; }
+  .pills { display: flex; gap: 6px; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11.5px; font-weight: 500; color: var(--ink-2);
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 999px; padding: 4px 10px;
+  }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--axis); flex: none; }
+  .dot.on { background: var(--good); }
+
+  .tabs {
+    display: flex; gap: 4px; margin-bottom: 12px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 4px;
+  }
+  .tabs button {
+    flex: 1; font: inherit; font-size: 13px; font-weight: 550;
+    border: none; background: none; color: var(--muted);
+    padding: 8px 0; border-radius: 9px; cursor: pointer;
+  }
+  .tabs button.active { background: var(--page); color: var(--ink-1);
+    box-shadow: inset 0 0 0 1px var(--border); }
+  section[hidden] { display: none; }
+  .banner {
+    display: none; align-items: center; gap: 8px;
+    background: var(--surface); border: 1px solid var(--warning);
+    border-radius: 12px; padding: 10px 14px; margin-bottom: 12px;
+    font-size: 13px; color: var(--ink-1);
+  }
+  .banner.show { display: flex; }
+  .banner b { font-variant-numeric: tabular-nums; }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 14px; box-shadow: var(--shadow);
+  }
+  .hero { padding: 14px 16px 12px; position: relative; overflow: hidden; }
+  .hero::before {
+    content: ""; position: absolute; left: 16px; right: 16px; bottom: 0;
+    height: 3px; border-radius: 3px 3px 0 0; background: var(--accent, transparent);
+  }
+  .label {
+    font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--muted);
+  }
+  .hero .value { font-size: 40px; font-weight: 650; letter-spacing: -0.02em; line-height: 1.15; }
+  .hero .unit { font-size: 14px; font-weight: 450; color: var(--ink-2); margin-left: 2px; }
+
+  .minis { display: grid; grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
+           gap: 8px; margin-top: 10px; }
+  .mini { padding: 10px 12px 9px; text-align: left; }
+  .mini .value { font-size: 18px; font-weight: 600; margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .mini .unit { font-size: 11px; color: var(--muted); font-weight: 400; }
+
+  .panel { margin-top: 12px; padding: 14px 16px 10px; }
+  .panel-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
+  .panel-head .swatch { width: 8px; height: 8px; border-radius: 2px; flex: none; align-self: center; }
+  .panel-head h2 { font-size: 12.5px; font-weight: 600; color: var(--ink-2); flex: 1; }
+  .panel-head .now { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .panel-head .now span { color: var(--muted); font-weight: 400; font-size: 11px; }
+  .panel-head .from { font-size: 11px; color: var(--muted); }
+  canvas { width: 100%; height: 120px; display: block; touch-action: none; }
+
+  .controls { margin-top: 14px; display: grid; gap: 10px; }
+  .stepper { display: flex; align-items: stretch; gap: 0; }
+  .stepper button, .actions button {
+    font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparent;
+    border: 1px solid var(--border); background: var(--surface); color: var(--ink-1);
+  }
+  .stepper button {
+    font-size: 24px; font-weight: 500; width: 64px; min-height: 52px;
+  }
+  .stepper .down { border-radius: 13px 0 0 13px; border-right: none; }
+  .stepper .up { border-radius: 0 13px 13px 0; border-left: none; }
+  .stepper .readout {
+    flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .stepper .readout .value { font-size: 20px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .stepper .readout .label { margin-top: 1px; }
+  .presets { display: flex; gap: 8px; }
+  .presets button {
+    flex: 1; font-size: 13.5px; font-weight: 550; min-height: 40px;
+    border: 1px solid var(--border); border-radius: 999px;
+    background: var(--surface); color: var(--ink-2); cursor: pointer;
+    font-variant-numeric: tabular-nums;
+  }
+  .presets button.active { border-color: var(--speed); color: var(--speed); font-weight: 650; }
+  .actions { display: flex; gap: 10px; }
+  .actions button {
+    flex: 1; min-height: 50px; font-size: 15px; font-weight: 650; border-radius: 13px;
+  }
+  #start { color: var(--good); }
+  #pause { color: var(--ink-2); }
+  #stop  { background: var(--critical); border-color: var(--critical); color: #fff; }
+  button:active { filter: brightness(0.9); }
+  button:disabled { opacity: 0.35; pointer-events: none; }
+
+  .list .row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 9px 0; border-top: 1px solid var(--border); font-size: 13px;
+  }
+  .list .row:first-child { border-top: none; }
+  .row .meta { flex: 1; min-width: 0; }
+  .row .meta .sub2 { color: var(--muted); font-size: 11.5px; margin-top: 1px; }
+  .btn-sm {
+    font: inherit; font-size: 12px; font-weight: 550; cursor: pointer;
+    padding: 6px 10px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--surface); color: var(--ink-2);
+  }
+  .linky { border: none; background: none; color: var(--speed); font: inherit;
+           font-size: 12.5px; cursor: pointer; }
+  #progEditor { margin-top: 6px; font-size: 13px; color: var(--ink-2); }
+  #progEditor summary { cursor: pointer; padding: 4px 0; }
+  #progEditor input, #progEditor select {
+    font: inherit; font-size: 13px; color: var(--ink-1);
+    background: var(--page); border: 1px solid var(--border);
+    border-radius: 8px; padding: 6px 8px; width: 60px;
+  }
+  #progEditor select { width: auto; }
+  #progEditor input#pName { width: 100%; margin: 6px 0; }
+  .prow { display: flex; align-items: center; gap: 5px; margin: 5px 0; flex-wrap: wrap; }
+  .prow span { display: inline-flex; align-items: center; gap: 5px; }
+  .prow span[hidden] { display: none !important; }
+  .rowbtns { display: flex; gap: 8px; margin-top: 8px; }
+  .empty { color: var(--muted); font-size: 12.5px; padding: 6px 0; }
+  .rlabel { display: flex; align-items: center; gap: 6px; font-size: 12px;
+            font-weight: 600; color: var(--ink-2); margin: 10px 0 4px; }
+  .legend { display: inline-flex; align-items: center; gap: 5px;
+            font-size: 11.5px; color: var(--ink-2); }
+  .legend i { width: 10px; height: 3px; border-radius: 2px; display: inline-block; }
+  .chips { display: flex; gap: 6px; margin: 4px 0 8px; }
+  .chips button {
+    font: inherit; font-size: 12px; font-weight: 550; cursor: pointer;
+    padding: 5px 12px; border-radius: 999px;
+    border: 1px solid var(--border); background: var(--surface); color: var(--muted);
+  }
+  .chips button.active { color: var(--hr); border-color: var(--hr); }
+  .tip {
+    position: fixed; pointer-events: none; display: none; z-index: 10;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 9px;
+    box-shadow: 0 3px 14px rgba(0,0,0,0.22); padding: 6px 10px; font-size: 12.5px;
+  }
+  .tip .t { color: var(--muted); font-variant-numeric: tabular-nums; }
+  footer { text-align: center; margin-top: 18px; font-size: 11px; color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>milltender</h1><span class="sub">TX6</span>
+  <div class="pills">
+    <span class="pill"><span id="hrDot" class="dot"></span>strap</span>
+    <span class="pill"><span id="tmDot" class="dot"></span><span id="stateTxt">–</span></span>
+  </div>
+</header>
+
+<nav class="tabs">
+  <button data-tab="live" class="active">Live</button>
+  <button data-tab="trends">Trends</button>
+  <button data-tab="history">History</button>
+  <button data-tab="programs">Programs</button>
+</nav>
+
+<div id="grace" class="banner">⏸ Belt stopped — uploading in <b id="graceT">–</b> unless you resume</div>
+
+<section data-tab="live">
+<div class="grid">
+  <div class="card hero" style="--accent: var(--speed)">
+    <div class="label">Speed</div>
+    <div class="value"><span id="vSpeed">–</span><span class="unit">mph</span></div>
+  </div>
+  <div class="card hero" style="--accent: var(--hr)">
+    <div class="label">Heart rate</div>
+    <div class="value"><span id="vHr">–</span><span class="unit">bpm</span></div>
+    <div class="sub2" id="vFresh" style="font-size:11.5px;color:var(--muted)"></div>
+  </div>
+</div>
+
+<div class="minis">
+  <div class="card mini"><div class="label">Time</div><div class="value" id="vTime">–</div></div>
+  <div class="card mini"><div class="label">Dist</div><div class="value" id="vDist">–<span class="unit"> mi</span></div></div>
+  <div class="card mini"><div class="label">Steps</div><div class="value" id="vSteps">–</div></div>
+  <div class="card mini"><div class="label">Cadence</div><div class="value" id="vCad">–<span class="unit"> spm</span></div></div>
+  <div class="card mini"><div class="label">Cal</div><div class="value" id="vKcal">–</div></div>
+</div>
+
+<div class="card panel">
+  <div class="panel-head">
+    <span class="swatch" style="background: var(--speed)"></span><h2>Speed</h2>
+    <span class="legend"><i style="background:rgba(250,178,25,0.55)"></i>no steps</span>
+    <span class="now" id="nowSpeed">– <span>mph</span></span>
+  </div>
+  <canvas id="cSpeed"></canvas>
+</div>
+<div class="card panel">
+  <div class="panel-head">
+    <span class="swatch" style="background: var(--hr)"></span><h2>Heart rate</h2>
+    <span class="from" id="hrFrom"></span>
+    <span class="now" id="nowHr">– <span>bpm</span></span>
+  </div>
+  <canvas id="cHr"></canvas>
+</div>
+<div class="card panel">
+  <div class="panel-head">
+    <span class="swatch" style="background: var(--hrv)"></span><h2>HRV · rMSSD, 60 s window</h2>
+    <span class="from" id="hrvBase"></span>
+    <span class="now" id="nowHrv">– <span>ms</span></span>
+  </div>
+  <canvas id="cHrv"></canvas>
+</div>
+
+<div class="controls">
+  <div class="stepper">
+    <button class="down" id="minus" aria-label="slower">−</button>
+    <div class="readout">
+      <div class="value" id="vTarget">–</div>
+      <div class="label">mph</div>
+    </div>
+    <button class="up" id="plus" aria-label="faster">+</button>
+  </div>
+  <div class="presets" id="presets"></div>
+  <div class="actions">
+    <button id="start">▸ Start</button>
+    <button id="pause">❙❙ Pause</button>
+    <button id="stop">■ Stop</button>
+  </div>
+</div>
+</section>
+
+<section data-tab="trends" hidden>
+<div class="minis" style="margin-top:0">
+  <div class="card mini"><div class="label">Week mi</div><div class="value" id="tWkMi">–</div></div>
+  <div class="card mini"><div class="label">Week steps</div><div class="value" id="tWkSteps">–</div></div>
+  <div class="card mini"><div class="label">Week time</div><div class="value" id="tWkTime">–</div></div>
+  <div class="card mini"><div class="label">Walks</div><div class="value" id="tWkN">–</div></div>
+</div>
+<div class="card panel">
+  <div class="panel-head">
+    <h2>Your heart rate by speed</h2>
+    <span class="legend"><i style="background:var(--muted)"></i>all time
+      <i style="background:var(--hr);margin-left:8px"></i><span id="tWinLbl">last 7d</span></span>
+  </div>
+  <div class="chips" id="tWin">
+    <button data-days="7" class="active">7d</button>
+    <button data-days="30">30d</button>
+    <button data-days="90">90d</button>
+    <button data-days="365">1y</button>
+  </div>
+  <canvas id="cCurve" style="height:150px"></canvas>
+  <div class="empty" id="tDelta"></div>
+</div>
+<div class="card panel">
+  <div class="panel-head"><h2>Recent sessions · recovery &amp; readiness</h2></div>
+  <div id="tRecent" class="list"><div class="empty">walk more to populate</div></div>
+</div>
+<div class="card panel">
+  <div class="panel-head"><h2>All time</h2></div>
+  <div class="empty" id="tAll"></div>
+</div>
+</section>
+
+<section data-tab="history" hidden>
+<div class="card panel" style="margin-top:0">
+  <div class="panel-head"><h2>History</h2></div>
+  <div id="histList" class="list"><div class="empty">no recorded sessions yet</div></div>
+</div>
+<div class="card panel" id="reviewPanel" hidden>
+  <div class="panel-head"><h2 id="reviewTitle">Session</h2>
+    <button class="linky" id="reviewClose">close ✕</button></div>
+  <div class="rlabel"><span class="swatch" style="background:var(--speed)"></span>Speed · mph</div>
+  <canvas id="rSpeed"></canvas>
+  <div class="rlabel"><span class="swatch" style="background:var(--hr)"></span>Heart rate · bpm</div>
+  <canvas id="rHr"></canvas>
+  <div class="rlabel"><span class="swatch" style="background:var(--hrv)"></span>HRV · rMSSD ms</div>
+  <canvas id="rHrv"></canvas>
+</div>
+</section>
+
+<section data-tab="programs" hidden>
+<div class="card panel" style="margin-top:0">
+  <div class="panel-head"><h2>Programs</h2></div>
+  <div id="progList" class="list"><div class="empty">none saved</div></div>
+  <details id="progEditor"><summary>New program</summary>
+    <input id="pName" placeholder="program name">
+    <div id="pRows"></div>
+    <div class="empty" id="pPreview"></div>
+    <div class="rowbtns">
+      <button class="btn-sm" id="pAdd">+ segment</button>
+      <button class="btn-sm" id="pDup">duplicate last 2</button>
+      <button class="btn-sm" id="pSave"><b>Save</b></button>
+    </div>
+  </details>
+</div>
+</section>
+
+<div class="tip" id="tip"></div>
+<footer id="foot">milltender</footer>
+
+<script>
+const $ = id => document.getElementById(id);
+const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+let status = {}, history = { points: [] };
+
+const fmtTime = s => {
+  if (s == null) return "–";
+  const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), sec = Math.floor(s % 60);
+  return (h ? h + ":" + String(m).padStart(2, "0") : m) + ":" + String(sec).padStart(2, "0");
+};
+
+function render() {
+  const running = status.state === 3;
+  const paused = status.state === 10 || status.user_paused;
+  $("tmDot").className = "dot" + (status.connected ? " on" : "");
+  $("stateTxt").textContent = !status.connected ? "asleep" :
+    running ? "running" : paused ? "paused" : "idle";
+  $("hrDot").className = "dot" + (status.hr_connected ? " on" : "");
+
+  $("vSpeed").textContent = running && status.speed_mph != null ? status.speed_mph.toFixed(1) : "–";
+  $("vHr").textContent = status.hr ?? "–";
+  $("vTime").textContent = fmtTime(status.in_session ? status.elapsed_s : null);
+  $("vDist").firstChild.textContent = status.in_session && status.dist_m != null ? (status.dist_m / 1609.34).toFixed(2) : "–";
+  $("vSteps").textContent = status.in_session ? (status.steps ?? "–") : "–";
+  $("vCad").firstChild.textContent = status.in_session && status.cadence_spm != null
+    ? Math.round(status.cadence_spm) : "–";
+  $("vKcal").textContent = status.in_session && status.kcal != null ? Math.round(status.kcal) : "–";
+  $("nowSpeed").firstChild.textContent = running && status.speed_mph != null ? status.speed_mph.toFixed(1) + " " : "– ";
+  $("nowHr").firstChild.textContent = (status.hr ?? "–") + " ";
+  $("nowHrv").firstChild.textContent = (status.hrv_ms != null ? Math.round(status.hrv_ms) : "–") + " ";
+  const f = status.fresh_bpm;
+  $("vFresh").textContent = f != null
+    ? (f >= 1 ? `▲ ${f} bpm fresher than typical @ ${status.fresh_mph}` :
+       f <= -1 ? `▼ ${-f} bpm above typical @ ${status.fresh_mph}` :
+       `≈ typical @ ${status.fresh_mph} mph`) : "";
+  const rd = status.readiness;
+  $("hrvBase").textContent = rd
+    ? `baseline ${rd.hrv}${rd.typ ? ` (typ ${rd.typ}±${rd.sd})` : ""}` : "";
+  $("vTarget").textContent = running ? curMph().toFixed(1) : "–";
+
+  // Rebuild the banner only when its kind changes (so its buttons stay tappable);
+  // per-second countdowns go into the #bT span alone.
+  const g = status.grace_s_left, prog = status.program, rec = status.recovery_s_left;
+  const banner = $("grace");
+  let kind = "", tick = "";
+  if (prog) { kind = `prog:${prog.name}:${prog.seg}`; tick = fmtTime(prog.seg_left_s); }
+  else if (rec != null) { kind = "recovery"; tick = fmtTime(rec); }
+  else if (status.user_paused) kind = "paused";
+  else if (g != null) { kind = "grace"; tick = fmtTime(g); }
+  if (kind !== banner.dataset.kind) {
+    banner.dataset.kind = kind;
+    banner.className = "banner" + (kind ? " show" : "");
+    banner.innerHTML =
+      kind.startsWith("prog") ? `▶ <b>${prog.name}</b> — ${prog.seg}/${prog.total}: <span id="bL"></span>, ` +
+        `<b id="bT"></b> left &nbsp;<button class="btn-sm" onclick="post('/api/program/cancel')">cancel</button>` :
+      kind === "recovery" ? `♥ Recording recovery — uploading in <b id="bT"></b>&nbsp;` +
+        `<button class="btn-sm" onclick="post('/api/recovery/finish')">upload now</button>` +
+        `<button class="btn-sm" onclick="post('/api/recovery/extend')">+1 min</button>` :
+      kind === "paused" ? "❙❙ Paused — resume when ready, or stop to upload" :
+      kind === "grace" ? `⏸ Belt stopped — uploading in <b id="bT"></b> unless you resume` : "";
+  }
+  const bT = document.getElementById("bT");
+  if (bT) bT.textContent = tick;
+  const bL = document.getElementById("bL");
+  if (bL && prog) bL.textContent = prog.label;
+
+  $("start").disabled = !status.connected || running;
+  $("start").textContent = (paused || g != null) ? "▸ Resume" : "▸ Start";
+  $("pause").disabled = !status.connected || !running;
+  $("stop").disabled = !status.connected || (!running && !paused && g == null);
+  $("stop").textContent = g != null ? "■ Upload now" : "■ Stop";
+  $("minus").disabled = $("plus").disabled = !running;
+  for (const b of $("presets").children) {
+    b.disabled = !running || parseFloat(b.dataset.mph) > (status.max_mph || 6);
+    b.classList.toggle("active", running && status.speed_mph != null &&
+      Math.abs(parseFloat(b.dataset.mph) - status.speed_mph) < 0.05);
+  }
+}
+
+async function pollStatus() {
+  try { status = await (await fetch("/api/status")).json(); }
+  catch { status = {}; }
+  render();
+}
+async function pollHistory() {
+  try { history = await (await fetch("/api/history")).json(); } catch {}
+  drawAll();
+}
+
+function hexA(hex, a) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`;
+}
+
+function draw(canvas, series, color, fmt, o = {}) {
+  const dpr = devicePixelRatio || 1, W = canvas.clientWidth, H = canvas.clientHeight;
+  if (!W) return null;  // hidden tab
+  canvas.width = W * dpr; canvas.height = H * dpr;
+  const ctx = canvas.getContext("2d");
+  ctx.scale(dpr, dpr); ctx.clearRect(0, 0, W, H);
+  const pts = series.filter(p => p[1] != null);
+  const extraPts = (o.extra?.series || []).filter(p => p[1] != null);
+  const dom = pts.concat(extraPts);
+  if (dom.length < 2) {
+    ctx.fillStyle = css("--muted"); ctx.font = "12px system-ui";
+    ctx.fillText("waiting for data", 4, H / 2);
+    return null;
+  }
+  const padL = 32, padR = 10, padT = 8, padB = 18;
+  const xs = dom.map(p => p[0]);
+  const x0 = o.xy ? Math.min(...xs) : 0;
+  const tMax = o.xy ? Math.max(...xs) : Math.max(...xs, 60);
+  let vMin = Math.min(...dom.map(p => p[1])), vMax = Math.max(...dom.map(p => p[1]));
+  if (vMax - vMin < 1) { vMax += 1; vMin = Math.max(0, vMin - 1); }
+  const span = vMax - vMin;
+  vMin = Math.max(0, vMin - span * 0.12); vMax += span * 0.12;
+  const x = t => padL + (W - padL - padR) * (t - x0) / Math.max(tMax - x0, 0.001);
+  const y = v => padT + (H - padT - padB) * (1 - (v - vMin) / (vMax - vMin));
+
+  if (o.bands) for (const [b0, b1] of o.bands) {
+    ctx.fillStyle = "rgba(250,178,25,0.14)";
+    ctx.fillRect(x(b0), padT, Math.max(x(b1) - x(b0), 2), H - padT - padB);
+  }
+  ctx.strokeStyle = css("--grid"); ctx.lineWidth = 1;
+  ctx.fillStyle = css("--muted"); ctx.font = "10px system-ui";
+  ctx.textAlign = "right"; ctx.textBaseline = "middle";
+  for (const v of [vMin, (vMin + vMax) / 2, vMax]) {
+    ctx.beginPath(); ctx.moveTo(padL, y(v) + 0.5); ctx.lineTo(W - padR, y(v) + 0.5); ctx.stroke();
+    ctx.fillText(fmt(v), padL - 5, y(v));
+  }
+  ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+  if (o.xy) {
+    for (const t of [x0, (x0 + tMax) / 2, tMax]) ctx.fillText(o.xfmt(t), x(t), H - 5);
+  } else {
+    const stepMin = Math.max(1, Math.ceil(tMax / 60 / 6));
+    for (let m = stepMin; m <= tMax / 60; m += stepMin) ctx.fillText(m + "m", x(m * 60), H - 5);
+  }
+
+  if (extraPts.length >= 2) {  // context series: thin line + small dots, no area
+    ctx.strokeStyle = o.extra.color; ctx.lineWidth = 2; ctx.lineJoin = "round";
+    ctx.beginPath();
+    extraPts.forEach((p, i) => i ? ctx.lineTo(x(p[0]), y(p[1])) : ctx.moveTo(x(p[0]), y(p[1])));
+    ctx.stroke();
+    if (o.dots) for (const p of extraPts) {
+      ctx.fillStyle = o.extra.color; ctx.beginPath();
+      ctx.arc(x(p[0]), y(p[1]), 2.5, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+  if (pts.length === 1 && o.dots) {  // lone bucket still deserves its dot
+    ctx.fillStyle = color; ctx.beginPath();
+    ctx.arc(x(pts[0][0]), y(pts[0][1]), 3.5, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = css("--surface"); ctx.lineWidth = 2; ctx.stroke();
+    return { x, y, pts, xfmt: o.xfmt };
+  }
+  if (pts.length < 2) return { x, y, pts: extraPts, xfmt: o.xfmt };
+  const grad = ctx.createLinearGradient(0, padT, 0, H - padB);
+  grad.addColorStop(0, hexA(color, 0.16)); grad.addColorStop(1, hexA(color, 0.0));
+  ctx.fillStyle = grad; ctx.beginPath();
+  ctx.moveTo(x(pts[0][0]), y(pts[0][1]));
+  for (const p of pts) ctx.lineTo(x(p[0]), y(p[1]));
+  ctx.lineTo(x(pts[pts.length - 1][0]), H - padB); ctx.lineTo(x(pts[0][0]), H - padB);
+  ctx.closePath(); ctx.fill();
+
+  ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.lineJoin = "round"; ctx.beginPath();
+  pts.forEach((p, i) => i ? ctx.lineTo(x(p[0]), y(p[1])) : ctx.moveTo(x(p[0]), y(p[1])));
+  ctx.stroke();
+
+  for (const p of (o.dots ? pts : [pts[pts.length - 1]])) {
+    ctx.fillStyle = color; ctx.beginPath();
+    ctx.arc(x(p[0]), y(p[1]), 3.5, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = css("--surface"); ctx.lineWidth = 2; ctx.stroke();
+  }
+  return { x, y, pts, xfmt: o.xfmt };
+}
+
+let geo = { speed: null, hr: null, hrv: null, curve: null,
+            rspeed: null, rhr: null, rhrv: null };
+let reviewPts = null;  // past-session samples shown in the History review panel
+function noStepBands(pts, mphIdx, cadIdx) {
+  // spans where the belt moved but steps didn't accumulate
+  const bands = [];
+  for (const p of pts) {
+    if (p[mphIdx] > 0.2 && (p[cadIdx] ?? 99) < 20) {
+      if (bands.length && p[0] - bands[bands.length - 1][1] < 6) bands[bands.length - 1][1] = p[0];
+      else bands.push([p[0], p[0]]);
+    }
+  }
+  return bands.filter(b => b[1] - b[0] >= 5);
+}
+function drawAll() {
+  const pts = history.points;
+  geo.speed = draw($("cSpeed"), pts.map(p => [p[0], p[1]]), css("--speed"), v => v.toFixed(1),
+                   { bands: noStepBands(pts, 1, 4) });
+  geo.hr = draw($("cHr"), pts.map(p => [p[0], p[2]]), css("--hr"), v => Math.round(v));
+  geo.hrv = draw($("cHrv"), pts.map(p => [p[0], p[3]]), css("--hrv"), v => Math.round(v));
+  const late = geo.hr && geo.speed && geo.hr.pts[0][0] - geo.speed.pts[0][0] > 5;
+  $("hrFrom").textContent = late ? "strap from " + fmtTime(geo.hr.pts[0][0]) : "";
+}
+function drawReview() {
+  if (!reviewPts) return;
+  geo.rspeed = draw($("rSpeed"), reviewPts.map(p => [p[0], p[1]]), css("--speed"), v => v.toFixed(1),
+                    { bands: noStepBands(reviewPts, 1, 5) });
+  geo.rhr = draw($("rHr"), reviewPts.map(p => [p[0], p[2]]), css("--hr"), v => Math.round(v));
+  geo.rhrv = draw($("rHrv"), reviewPts.map(p => [p[0], p[4] ?? null]), css("--hrv"), v => Math.round(v));
+}
+
+function hover(ev, canvas, g, unit, redraw) {
+  const tip = $("tip");
+  if (!g) { tip.style.display = "none"; return; }
+  const rect = canvas.getBoundingClientRect();
+  const px = ev.clientX - rect.left;
+  let best = g.pts[0];
+  for (const p of g.pts) if (Math.abs(g.x(p[0]) - px) < Math.abs(g.x(best[0]) - px)) best = p;
+  const xlabel = g.xfmt ? g.xfmt(best[0]) + " mph" : fmtTime(best[0]);
+  tip.innerHTML = `<b>${unit === "mph" ? best[1].toFixed(1) : Math.round(best[1])}</b> ${unit} <span class="t">· ${xlabel}</span>`;
+  tip.style.display = "block";
+  tip.style.left = Math.min(ev.clientX + 12, innerWidth - 140) + "px";
+  tip.style.top = (rect.top + 6) + "px";
+  redraw();
+  const ctx = canvas.getContext("2d");
+  ctx.strokeStyle = css("--axis"); ctx.lineWidth = 1;
+  ctx.setLineDash([3, 3]);
+  ctx.beginPath(); ctx.moveTo(g.x(best[0]) + 0.5, 6); ctx.lineTo(g.x(best[0]) + 0.5, canvas.clientHeight - 16); ctx.stroke();
+  ctx.setLineDash([]);
+}
+const redraws = { speed: drawAll, hr: drawAll, hrv: drawAll,
+                  rspeed: drawReview, rhr: drawReview, rhrv: drawReview,
+                  curve: () => drawCurve() };
+for (const [id, key, unit] of [["cSpeed", "speed", "mph"], ["cHr", "hr", "bpm"],
+                               ["cHrv", "hrv", "ms"], ["cCurve", "curve", "bpm"],
+                               ["rSpeed", "rspeed", "mph"], ["rHr", "rhr", "bpm"],
+                               ["rHrv", "rhrv", "ms"]]) {
+  $(id).addEventListener("pointermove", ev => hover(ev, $(id), geo[key], unit, redraws[key]));
+  $(id).addEventListener("pointerleave", () => { $("tip").style.display = "none"; redraws[key](); });
+}
+
+async function post(path, body) {
+  try { await fetch(path, { method: "POST", body: JSON.stringify(body || {}) }); } catch {}
+  pollStatus();
+}
+// Optimistic speed target: rapid taps stack instead of racing 1s-stale status.
+let targetMph = null, targetAt = 0;
+const curMph = () => (targetMph != null && Date.now() - targetAt < 3000)
+  ? targetMph : (status.speed_mph || 0.4);
+function setSpeed(v) {
+  targetMph = Math.round(v * 10) / 10;
+  targetAt = Date.now();
+  post("/api/speed", { mph: targetMph });
+}
+$("minus").onclick = () => setSpeed(Math.max(0.4, curMph() - 0.1));
+$("plus").onclick = () => setSpeed(Math.min(status.max_mph || 6, curMph() + 0.1));
+$("pause").onclick = () => post("/api/pause");
+$("stop").onclick = () => { if (confirm("Stop and upload this session now?")) post("/api/stop"); };
+$("start").onclick = () => {
+  if (status.in_session || confirm("Start the belt?")) post("/api/start");
+};
+for (const mph of [1.0, 1.5, 2.0, 2.5, 3.0]) {
+  const b = document.createElement("button");
+  b.textContent = mph.toFixed(1);
+  b.dataset.mph = mph;
+  b.onclick = () => setSpeed(mph);
+  $("presets").appendChild(b);
+}
+// ---- history ----
+async function loadSessions() {
+  let list = [];
+  try { list = await (await fetch("/api/sessions")).json(); } catch {}
+  const el = $("histList");
+  if (!list.length) { el.innerHTML = '<div class="empty">no recorded sessions yet</div>'; return; }
+  el.innerHTML = "";
+  for (const s of list.slice(0, 30)) {
+    const d = new Date(s.start * 1000);
+    const row = document.createElement("div");
+    row.className = "row";
+    row.innerHTML = `<div class="meta"><div>${d.toLocaleDateString([], {month:"short", day:"numeric"})}
+        ${d.toLocaleTimeString([], {hour:"numeric", minute:"2-digit"})}</div>
+      <div class="sub2">${fmtTime(s.duration_s)} · ${(s.dist_m/1609.34).toFixed(2)} mi · ${s.steps} steps${s.hr_avg ? " · ♥ " + s.hr_avg : ""}${s.hrr60 ? " · HRR60 " + s.hrr60 : ""}</div></div>
+      <button class="btn-sm" data-a="view">view</button>
+      <button class="btn-sm" data-a="replay">replay</button>
+      <a class="btn-sm" style="text-decoration:none" href="${s.fit}" download>fit</a>`;
+    row.querySelector('[data-a="view"]').onclick = async () => {
+      const data = await (await fetch("/api/session?name=" + s.name)).json();
+      reviewPts = data.samples;
+      const d = new Date(s.start * 1000);
+      $("reviewTitle").textContent =
+        d.toLocaleDateString([], {month:"short", day:"numeric"}) + " " +
+        d.toLocaleTimeString([], {hour:"numeric", minute:"2-digit"}) +
+        " · " + fmtTime(s.duration_s);
+      $("reviewPanel").hidden = false;
+      drawReview();
+      $("reviewPanel").scrollIntoView({ behavior: "smooth" });
+    };
+    row.querySelector('[data-a="replay"]').onclick = () => {
+      if (confirm(`Replay this session's speed profile? The belt will start.`))
+        post("/api/replay", { name: s.name });
+    };
+    el.appendChild(row);
+  }
+}
+$("reviewClose").onclick = () => { $("reviewPanel").hidden = true; reviewPts = null; };
+
+// ---- programs ----
+function progRow(seg = { type: "hold" }) {
+  const div = document.createElement("div");
+  div.className = "prow";
+  div.innerHTML = `
+    <select name="type"><option value="hold">hold</option><option value="ramp">ramp</option>
+      <option value="hr">hr hold</option><option value="goal">goal</option></select>
+    <span data-f="hold"><input name="minutes" type="number" step="0.5" min="0.5"> min at
+      <input name="mph" type="number" step="0.1" min="0.4" max="6"> mph</span>
+    <span data-f="ramp" hidden><input name="rate" type="number" step="0.1" min="-2" max="2"> mph /
+      <input name="per" type="number" step="1" min="2"> s
+      <select name="mode"><option value="for">for</option><option value="until">until</option></select>
+      <span data-m="for"><input name="rmin" type="number" step="0.5" min="0.5"> min</span>
+      <span data-m="until" hidden><input name="until" type="number" step="0.1" min="0.4" max="6"> mph</span></span>
+    <span data-f="hr" hidden>♥ <input name="bpm" type="number" step="1" min="60" max="190"> bpm for
+      <input name="hmin" type="number" step="1" min="1"> min, max
+      <input name="hmax" type="number" step="0.1" min="0.4" max="6"> mph</span>
+    <span data-f="goal" hidden><input name="gmph" type="number" step="0.1" min="0.4" max="6"> mph until
+      <input name="gval" type="number" step="1" min="1">
+      <select name="gunit"><option value="steps">steps</option><option value="miles">mi</option></select></span>
+    <button type="button" class="btn-sm" name="del">×</button>`;
+  const q = n => div.querySelector(`[name=${n}]`);
+  q("type").value = seg.type || "hold";
+  q("minutes").value = seg.type === "hold" && seg.minutes || 3;
+  q("mph").value = seg.mph ?? 2.0;
+  q("rate").value = seg.rate_mph ?? 0.1;
+  q("per").value = seg.per_s ?? 10;
+  q("mode").value = seg.until_mph != null ? "until" : "for";
+  q("rmin").value = seg.type === "ramp" && seg.minutes || 2;
+  q("until").value = seg.until_mph ?? 2.5;
+  q("bpm").value = seg.bpm ?? 110;
+  q("hmin").value = seg.type === "hr" && seg.minutes || 20;
+  q("hmax").value = seg.max_mph ?? 3.0;
+  q("gmph").value = seg.type === "goal" && seg.mph || 2.0;
+  q("gval").value = seg.steps ?? (seg.miles ?? 3000);
+  q("gunit").value = seg.miles != null ? "miles" : "steps";
+  const sync = () => {
+    const t = q("type").value;
+    for (const f of div.querySelectorAll("[data-f]")) f.hidden = f.dataset.f !== t;
+    for (const m of div.querySelectorAll("[data-m]")) m.hidden = m.dataset.m !== q("mode").value;
+    preview();
+  };
+  q("type").onchange = q("mode").onchange = q("gunit").onchange = sync;
+  div.querySelectorAll("input").forEach(inp => inp.oninput = preview);
+  q("del").onclick = () => { div.remove(); preview(); };
+  $("pRows").appendChild(div);
+  sync();
+}
+function rowSeg(div) {
+  const q = n => +div.querySelector(`[name=${n}]`).value || 0;
+  const t = div.querySelector("[name=type]").value;
+  if (t === "hold") return { type: "hold", minutes: q("minutes"), mph: q("mph") };
+  if (t === "hr") return { type: "hr", bpm: q("bpm"), minutes: q("hmin"), max_mph: q("hmax") };
+  if (t === "goal") {
+    const seg = { type: "goal", mph: q("gmph") };
+    seg[div.querySelector("[name=gunit]").value] = q("gval");
+    return seg;
+  }
+  const seg = { type: "ramp", rate_mph: q("rate"), per_s: q("per") };
+  if (div.querySelector("[name=mode]").value === "until") seg.until_mph = q("until");
+  else seg.minutes = q("rmin");
+  return seg;
+}
+function estimate(segs) {
+  let speed = 0.4, total = 0;
+  for (const s of segs) {
+    if (s.type === "hold") { speed = s.mph; total += s.minutes * 60; }
+    else if (s.type === "hr") { total += s.minutes * 60; }
+    else if (s.type === "goal") {
+      speed = s.mph;
+      total += s.steps != null ? s.steps / 1.8 : (s.miles / Math.max(s.mph, 0.4)) * 3600;
+    } else if (s.minutes != null) {
+      total += s.minutes * 60;
+      speed = Math.max(0.4, Math.min(6, speed + s.rate_mph * (s.minutes * 60 / Math.max(s.per_s, 2))));
+    } else {
+      const rate = Math.abs(s.rate_mph) || 0.1;
+      total += Math.abs(s.until_mph - speed) / rate * Math.max(s.per_s, 2);
+      speed = s.until_mph;
+    }
+  }
+  return { total, speed };
+}
+function segDesc(s) {
+  if (s.type === "hold" || !s.type) return `${s.mph}×${s.minutes}m`;
+  if (s.type === "hr") return `♥${s.bpm}×${s.minutes}m≤${s.max_mph ?? 3}`;
+  if (s.type === "goal") return s.steps != null ? `${s.mph}→${s.steps}st` : `${s.mph}→${s.miles}mi`;
+  return `${s.rate_mph > 0 ? "+" : ""}${s.rate_mph}/${s.per_s}s${s.until_mph != null ? "→" + s.until_mph : "×" + s.minutes + "m"}`;
+}
+function preview() {
+  const segs = [...$("pRows").children].map(rowSeg);
+  const est = estimate(segs);
+  $("pPreview").textContent = segs.length
+    ? `≈ ${fmtTime(Math.round(est.total))} total (goal/hr segments estimated)` : "";
+}
+$("pAdd").onclick = () => { progRow(); };
+$("pDup").onclick = () => {
+  for (const r of [...$("pRows").children].slice(-2)) progRow(rowSeg(r));
+};
+$("pSave").onclick = async () => {
+  const segments = [...$("pRows").children].map(rowSeg);
+  const name = $("pName").value.trim();
+  if (!name || !segments.length) { alert("name + at least one segment"); return; }
+  await fetch("/api/programs", { method: "POST", body: JSON.stringify({ name, segments }) });
+  loadPrograms();
+};
+async function loadPrograms() {
+  let progs = {};
+  try { progs = await (await fetch("/api/programs")).json(); } catch {}
+  const el = $("progList");
+  const names = Object.keys(progs);
+  if (!names.length) { el.innerHTML = '<div class="empty">none saved</div>'; return; }
+  el.innerHTML = "";
+  for (const name of names) {
+    const segs = progs[name];
+    const est = estimate(segs);
+    const row = document.createElement("div");
+    row.className = "row";
+    row.innerHTML = `<div class="meta"><div>${name}</div>
+      <div class="sub2">≈${Math.round(est.total / 60)} min · ${segs.map(segDesc).join(" · ")}</div></div>
+      <button class="btn-sm" data-a="edit">edit</button>
+      <button class="btn-sm" data-a="run">▶ run</button>
+      <button class="btn-sm" data-a="del">×</button>`;
+    row.querySelector('[data-a="run"]').onclick = () => {
+      if (confirm(`Run "${name}"? The belt will start.`)) post("/api/program/run", { name });
+    };
+    row.querySelector('[data-a="edit"]').onclick = () => {
+      $("pRows").innerHTML = ""; $("pName").value = name;
+      for (const s of segs) progRow(s);
+      $("progEditor").open = true; preview();
+    };
+    row.querySelector('[data-a="del"]').onclick = () => {
+      if (confirm(`Delete "${name}"?`))
+        fetch("/api/program/delete", { method: "POST", body: JSON.stringify({ name }) }).then(loadPrograms);
+    };
+    el.appendChild(row);
+  }
+}
+// ---- tabs & trends ----
+for (const b of document.querySelectorAll(".tabs button")) b.onclick = () => {
+  document.querySelectorAll(".tabs button").forEach(x => x.classList.toggle("active", x === b));
+  document.querySelectorAll("section[data-tab]").forEach(s => s.hidden = s.dataset.tab !== b.dataset.tab);
+  if (b.dataset.tab === "trends") loadTrends();
+  if (b.dataset.tab === "live") drawAll();
+  if (b.dataset.tab === "history") drawReview();
+};
+
+let winDays = 7;
+let lastCurve = null;
+function drawCurve() {
+  if (!lastCurve) return;
+  geo.curve = draw($("cCurve"), lastCurve.recent, css("--hr"), v => Math.round(v),
+                   { xy: true, dots: true, xfmt: x => x.toFixed(1),
+                     extra: { series: lastCurve.all, color: css("--muted") } });
+}
+for (const b of document.querySelectorAll("#tWin button")) b.onclick = () => {
+  winDays = +b.dataset.days;
+  document.querySelectorAll("#tWin button").forEach(x => x.classList.toggle("active", x === b));
+  loadTrends();
+};
+
+async function loadTrends() {
+  let t;
+  try { t = await (await fetch("/api/trends?days=" + winDays)).json(); } catch { return; }
+  $("tWkMi").textContent = (t.week.dist_m / 1609.34).toFixed(1);
+  $("tWkSteps").textContent = t.week.steps.toLocaleString();
+  $("tWkTime").textContent = fmtTime(t.week.seconds);
+  $("tWkN").textContent = t.week.sessions;
+  $("tAll").textContent = `${(t.all.dist_m / 1609.34).toFixed(1)} mi · ` +
+    `${t.all.steps.toLocaleString()} steps · ${(t.all.seconds / 3600).toFixed(1)} h · ` +
+    `${t.all.sessions} walks`;
+  const lbl = winDays >= 365 ? "1y" : winDays + "d";
+  $("tWinLbl").textContent = "last " + lbl;
+  lastCurve = { recent: t.curve_recent.map(c => [c.mph, c.bpm]),
+                all: t.curve_all.map(c => [c.mph, c.bpm]) };
+  drawCurve();
+  const allBy = Object.fromEntries(t.curve_all.map(c => [c.mph, c.bpm]));
+  const deltas = t.curve_recent.filter(c => allBy[c.mph] != null)
+                               .map(c => c.bpm - allBy[c.mph]);
+  $("tDelta").textContent = deltas.length
+    ? `last ${lbl} vs all time at matching speeds: ` +
+      `${(deltas.reduce((a, d) => a + d, 0) / deltas.length).toFixed(1)} bpm ` +
+      `(negative = fitter)` : "";
+  const el = $("tRecent");
+  if (!t.recent.length) { el.innerHTML = '<div class="empty">walk more to populate</div>'; return; }
+  el.innerHTML = "";
+  for (const r of t.recent) {
+    const d = new Date(r.start * 1000);
+    const row = document.createElement("div");
+    row.className = "row";
+    row.innerHTML = `<div class="meta"><div>${d.toLocaleDateString([], {month:"short", day:"numeric"})}
+      ${d.toLocaleTimeString([], {hour:"numeric", minute:"2-digit"})} · ${fmtTime(r.duration_s)} ·
+      ${(r.dist_m / 1609.34).toFixed(2)} mi</div>
+      <div class="sub2">${r.hrr60 != null ? "HRR60 " + r.hrr60 + " bpm" : "no recovery data"} ·
+      ${r.hrv_baseline != null ? "HRV baseline " + r.hrv_baseline + " ms" : "no HRV"}</div></div>`;
+    el.appendChild(row);
+  }
+}
+
+progRow({ type: "hold", minutes: 5, mph: 1.5 });
+loadSessions(); loadPrograms();
+setInterval(() => { loadSessions(); if (!document.querySelector('[data-tab="trends"]').hidden) loadTrends(); }, 30000);
+
+$("foot").textContent = "milltender · " + location.host;
+
+setInterval(pollStatus, 1000); pollStatus();
+setInterval(() => {
+  if (!document.hidden && !document.querySelector('section[data-tab="live"]').hidden)
+    pollHistory();
+}, 3000); pollHistory();
+addEventListener("resize", () => { drawAll(); drawReview(); });
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { drawAll(); drawReview(); });
+</script>
+</body>
+</html>

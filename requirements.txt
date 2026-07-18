@@ -1,0 +1,16 @@
+# Phase 0 probe/test dependencies
+bleak>=0.22
+requests>=2.32
+python-dotenv>=1.0
+# FIT encoding: fit_tool on PyPI is a stale community fork with known bugs.
+# If it misbehaves, swap for the patched fork:
+#   pip install git+https://github.com/jeffrywalker/python_fit_tool
+fit-tool
+# Unofficial Garmin Connect client (needs curl_cffi for TLS impersonation).
+# Pinned to git master: the 0.3.6 release's widget-MFA flow is broken (verified
+# 2026-07-17); master's works. Revisit when a >0.3.6 release lands.
+garminconnect @ git+https://github.com/cyberjunky/python-garminconnect.git@master
+curl_cffi
+
+# web UI
+aiohttp>=3.9
