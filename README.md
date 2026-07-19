@@ -119,15 +119,15 @@ where the signal isn't there, rather than reporting noise.
 |---|---|---|
 | `TREADMILL_ADDRESS` | (a TX6) | BLE address/UUID of your treadmill |
 | `TREADMILL_NAME_PREFIX` | `FS-` | fallback discovery by name prefix |
-
-The default address won't match your unit; discovery falls back to scanning for
-the `FS-` name prefix and finds it automatically — set `TREADMILL_ADDRESS` only
-to pin a specific device.
 | `HRM_ADDRESS` | `auto` | pin a heart-rate device, or auto-discover |
 | `WEB_PORT` | `8321` | dashboard port |
 | `MAX_MPH` | `6.0` | hard ceiling on every speed the daemon commands |
 | `GRACE_S` | `180` | resume window after the belt stops before uploading |
 | `RECOVERY_S` | `60` | recovery-HR capture after a deliberate stop |
+
+The default `TREADMILL_ADDRESS` won't match your unit; discovery falls back to
+scanning for the `FS-` name prefix and finds it automatically — set the address
+only to pin a specific device.
 
 `MAX_MPH` binds manual controls, programs, ramps, and HR-holds alike. It
 cannot restrain the handheld remote, which talks to the base on its own radio.
