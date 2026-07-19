@@ -10,13 +10,19 @@ its own; your data lives in files on your machine.
 
 Built for the LifeSpan TX6 Glow-Up, whose stock app deserved replacing.
 
+<p align="center">
+  <img src="assets/dashboard-trends.png" alt="Trends: heart-rate-by-speed curve, weekly totals, per-session recovery and readiness" width="45%">
+  &nbsp;
+  <img src="assets/dashboard-history.png" alt="History: every session, reviewable and replayable" width="45%">
+</p>
+
 ## Supported hardware
 
 - **Treadmill**: any pad whose Bluetooth module speaks the FitShow protocol —
   the base advertises as `FS-…`. Developed and tested on the LifeSpan TX6
   Glow-Up (FitShow FS-BT-D2 module); other FitShow-equipped pads should work,
-  possibly needing unit-calibration tweaks. The protocol notes live in
-  [PLAN.md](PLAN.md), the project's research and decision record.
+  possibly needing unit-calibration tweaks. The protocol details live in
+  `phase0/fitshow_probe.py` and the daemon source.
 - **Heart rate**: any BLE heart-rate device. A chest strap (e.g. Garmin
   HRM-Dual) provides beat-to-beat RR intervals for real HRV; a watch
   broadcasting wrist HR works too but carries no RR, so HRV stays blank.

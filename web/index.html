@@ -777,6 +777,7 @@ async function loadPrograms() {
 for (const b of document.querySelectorAll(".tabs button")) b.onclick = () => {
   document.querySelectorAll(".tabs button").forEach(x => x.classList.toggle("active", x === b));
   document.querySelectorAll("section[data-tab]").forEach(s => s.hidden = s.dataset.tab !== b.dataset.tab);
+  location.replace("#" + b.dataset.tab);
   if (b.dataset.tab === "trends") loadTrends();
   if (b.dataset.tab === "live") drawAll();
   if (b.dataset.tab === "history") drawReview();
@@ -839,6 +840,9 @@ loadSessions(); loadPrograms();
 setInterval(() => { loadSessions(); if (!document.querySelector('[data-tab="trends"]').hidden) loadTrends(); }, 30000);
 
 $("foot").textContent = "milltender · " + location.host;
+
+const startTab = document.querySelector(`.tabs button[data-tab="${location.hash.slice(1)}"]`);
+if (startTab) startTab.click();
 
 setInterval(pollStatus, 1000); pollStatus();
 setInterval(() => {

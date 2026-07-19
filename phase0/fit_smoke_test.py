@@ -16,7 +16,7 @@ One-time setup, credentials in .env next to this repo's README:
        curl -X POST https://www.strava.com/oauth/token -d client_id=<ID> -d client_secret=<SECRET> -d code=<CODE> -d grant_type=authorization_code
     3. Put in .env: STRAVA_CLIENT_ID, STRAVA_CLIENT_SECRET, STRAVA_REFRESH_TOKEN
 
-  Garmin (unofficial API — see PLAN.md caveats):
+  Garmin (unofficial API — see the README caveats):
     .env: GARMIN_EMAIL, GARMIN_PASSWORD   (MFA prompt appears on first login;
     tokens cached in ~/.garminconnect thereafter)
 

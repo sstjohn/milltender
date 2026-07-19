@@ -9,7 +9,7 @@ Usage:
   python ble_census.py --scan              # find the treadmill (plug it in, wake it)
   python ble_census.py --address <ADDR>    # full GATT dump + protocol probes
 
-What we're trying to learn (see PLAN.md):
+What we're trying to learn:
   1. Does the base expose the native LifeSpan service FFF0 (like consoles do)?
   2. Does it expose standard FTMS (0x1826)? Both?
   3. Which characteristic accepts the A1 reads: FFF2 (treadspan/Omni) or FFF1 (pcorliss)?
