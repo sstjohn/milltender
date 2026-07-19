@@ -306,6 +306,7 @@
 <div class="card panel" id="reviewPanel" hidden>
   <div class="panel-head"><h2 id="reviewTitle">Session</h2>
     <button class="linky" id="reviewClose">close ✕</button></div>
+  <div class="empty" id="driftStat" hidden></div>
   <div class="rlabel"><span class="swatch" style="background:var(--speed)"></span>Speed · mph</div>
   <canvas id="rSpeed"></canvas>
   <div class="rlabel"><span class="swatch" style="background:var(--hr)"></span>Heart rate · bpm</div>
@@ -545,6 +546,14 @@ function drawReview() {
                     { bands: noStepBands(reviewPts, 1, 5) });
   geo.rhr = draw($("rHr"), reviewPts.map(p => [p[0], p[2]]), css("--hr"), v => Math.round(v));
   geo.rhrv = draw($("rHrv"), reviewPts.map(p => [p[0], p[4] ?? null]), css("--hrv"), v => Math.round(v));
+  const drift = reviewMeta && reviewMeta.drift_pct;
+  const ds = $("driftStat");
+  ds.hidden = drift == null;
+  if (drift != null) {
+    const grade = drift < 5 ? "solid aerobic durability" : drift < 10 ? "moderate drift" : "significant drift";
+    ds.innerHTML = `Aerobic decoupling <b>${drift > 0 ? "+" : ""}${drift}%</b> — ${grade} ` +
+      `<span style="opacity:.6">(HR at matched pace, first half → second; lower is steadier)</span>`;
+  }
   drawRecovery();
 }
 function drawRecovery() {

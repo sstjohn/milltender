@@ -146,6 +146,52 @@ def test_recovery_dropout_does_not_fabricate_tau():
     assert rec is None or rec["tau"] is None
 
 
+def _steady_walk(minutes, hr_first, hr_second, speed=0.9):
+    from fit_build import Sample
+    n = minutes * 60
+    return [Sample(t=i, speed_mps=speed, dist_m=0, steps=i * 2, kcal=0,
+                   hr=hr_first if i < n / 2 else hr_second, active=True)
+            for i in range(n)]
+
+
+def test_drift_positive_when_hr_climbs():
+    # steady pace, HR drifts 100 -> 112: efficiency drops, decoupling positive
+    d = milltender.cardiac_drift(_steady_walk(30, 100, 112))
+    assert d is not None and d > 5
+
+
+def test_drift_near_zero_when_steady():
+    d = milltender.cardiac_drift(_steady_walk(30, 105, 105))
+    assert d is not None and abs(d) < 2
+
+
+def test_drift_none_on_short_walk():
+    assert milltender.cardiac_drift(_steady_walk(10, 100, 115)) is None
+
+
+def test_drift_none_when_halves_share_no_pace():
+    from fit_build import Sample
+    # first half slow, second half fast, split cleanly at the post-warmup midpoint:
+    # no common pace to compare, so decoupling is undefined
+    s = [Sample(t=i, speed_mps=0.8 if i < 1080 else 1.4, dist_m=0, steps=i * 2, kcal=0,
+                hr=105, active=True) for i in range(1980)]
+    assert milltender.cardiac_drift(s) is None
+
+
+def test_drift_detected_despite_intervals():
+    from fit_build import Sample
+    # pace alternates every minute; HR is +10 in the second half at BOTH paces —
+    # matching on pace catches the drift the raw efficiency ratio would blur
+    s = []
+    for i in range(1800):
+        mph = 0.8 if (i // 60) % 2 else 1.4
+        hr = (105 if mph == 0.8 else 120) + (10 if i >= 900 else 0)
+        s.append(Sample(t=i, speed_mps=mph * 0.44704, dist_m=0, steps=i * 2, kcal=0,
+                        hr=hr, active=True))
+    d = milltender.cardiac_drift(s)
+    assert d is not None and d > 5
+
+
 def test_recovery_none_without_belt_stop():
     from fit_build import Sample
     active_only = [Sample(t=i, speed_mps=0.9, dist_m=0, steps=i * 2, kcal=0, hr=100)

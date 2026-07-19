@@ -111,6 +111,37 @@ def recovery_analysis(samples: list[Sample]) -> dict | None:
     return {"peak": peak, "hrr30": hrr30, "hrr60": hrr60, "tau": tau}
 
 
+def cardiac_drift(samples: list[Sample]) -> float | None:
+    """Aerobic decoupling: at the paces walked in both halves of a session, did
+    the heart work harder in the second half? Matching on pace controls for a
+    variable walk, so this holds up where a plain efficiency ratio wouldn't. None
+    for short sessions or when the halves share no pace. Positive % = HR higher
+    later at the same pace (drift, less durable); under ~5% is solid."""
+    active = [s for s in samples if s.active and s.hr and s.speed_mps > 0.1]
+    if len(active) < 60 or active[-1].t - active[0].t < 1200:  # need ~20 min
+        return None
+    core = [s for s in active if s.t >= active[0].t + 180]  # drop warmup: HR still climbing
+    if len(core) < 40 or core[-1].t - core[0].t < 600:
+        return None
+    mid = core[0].t + (core[-1].t - core[0].t) / 2
+
+    def by_pace(half: list[Sample]) -> dict[float, list[int]]:
+        buckets: dict[float, list[int]] = {}
+        for s in half:
+            buckets.setdefault(round(s.speed_mps / MPH_TO_MPS, 1), []).append(s.hr)
+        return {mph: hrs for mph, hrs in buckets.items() if len(hrs) >= 20}
+
+    first = by_pace([s for s in core if s.t < mid])
+    second = by_pace([s for s in core if s.t >= mid])
+    num = den = 0.0
+    for mph in set(first) & set(second):  # weighted by time spent at each shared pace
+        h1 = sum(first[mph]) / len(first[mph])
+        h2 = sum(second[mph]) / len(second[mph])
+        w = min(len(first[mph]), len(second[mph]))
+        num, den = num + w * (h2 - h1) / h1, den + w
+    return round(num / den * 100, 1) if den else None
+
+
 def clamp_mph(mph: float) -> float:
     """Every daemon-commanded speed passes through here. The remote is hardware
     and beyond our reach; everything we send respects MAX_MPH."""
@@ -455,16 +486,19 @@ class Daemon:
                  sum(1 for s in samples if s.hr), fit_path.name)
         hrs = [s.hr for s in samples if s.hr]
         recovery = recovery_analysis(samples)
+        drift = cardiac_drift(samples)
         if recovery:
             log.info("recovery: HRR60=%s HRR30=%s tau=%s",
                      recovery["hrr60"], recovery["hrr30"], recovery["tau"])
+        if drift is not None:
+            log.info("cardiac drift: %+.1f%%", drift)
         early = sorted(s.hrv for s in samples if s.hrv and s.t - samples[0].t <= 150)
         hrv_baseline = round(early[len(early) // 2], 1) if early else None
         write_atomic(fit_path.with_suffix(".json"), json.dumps({
             "start": samples[0].t, "duration_s": round(duration),
             "dist_m": round(samples[-1].dist_m, 1), "steps": steps,
             "recovery": recovery, "hrr60": recovery and recovery["hrr60"],
-            "hrv_baseline": hrv_baseline,
+            "drift_pct": drift, "hrv_baseline": hrv_baseline,
             "kcal": round(samples[-1].kcal - samples[0].kcal),
             "hr_avg": round(sum(hrs) / len(hrs)) if hrs else None,
             "samples": [[round(s.t - samples[0].t, 1), round(s.speed_mps / MPH_TO_MPS, 2),

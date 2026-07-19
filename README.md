@@ -105,6 +105,14 @@ replayable, FIT downloads), and **Programs** (interval workouts from four
 building blocks: timed holds, speed ramps, heart-rate holds, and step/distance
 goals; any past session can be replayed as a program).
 
+Reviewing a session shows a few things the upload platforms don't, computed
+from the per-second data kept locally: **heart-rate recovery** after the belt
+stops (HRR30/HRR60 and the exponential decay constant τ), and **aerobic
+decoupling** — whether your heart worked harder at the same pace in the second
+half of the walk than the first, a durability signal that holds up on a real,
+variable walk because it matches on pace. Both stay quiet at easy intensities
+where the signal isn't there, rather than reporting noise.
+
 ## Configuration (`.env`)
 
 | Variable | Default | Meaning |
