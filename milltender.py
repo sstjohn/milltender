@@ -63,6 +63,54 @@ def frame(payload: bytes) -> bytes:
     return bytes([0x02, *payload, xor, 0x03])
 
 
+def recovery_analysis(samples: list[Sample]) -> dict | None:
+    """Heart-rate recovery after the belt stops: HRR at 30 and 60 s, and the
+    exponential decay time constant tau (lower = faster recovery). The signal is
+    weak at walking intensity (small HR excursion), so every field is guarded and
+    the whole thing is None when there was no real drop to measure."""
+    last_active = next((s for s in reversed(samples) if s.active), None)
+    if not last_active or not last_active.hr:
+        return None
+    t0, peak = last_active.t, last_active.hr
+    pts = [(s.t - t0, s.hr) for s in samples if not s.active and s.hr and s.t >= t0]
+    if len(pts) < 5 or pts[-1][0] < 25:
+        return None
+
+    def hrr_at(sec: int) -> int | None:
+        # median of the ±10 s window, so one strap dropout can't swing it
+        win = sorted(hr for t, hr in pts if abs(t - sec) <= 10)
+        return peak - win[len(win) // 2] if win else None
+
+    hrr30, hrr60 = hrr_at(30), hrr_at(60)
+
+    # tau needs a real, sustained drop behind it: below ~5 bpm the fit is chasing
+    # noise. Gate on the median-windowed HRR (immune to a lone bad sample), never
+    # a single minimum.
+    real_drop = max((d for d in (hrr30, hrr60) if d is not None), default=0)
+    tau, lo, hi = None, 8, 200
+    if real_drop >= 5:
+        best_resid = None
+        for candidate in range(lo, hi + 1, 2):  # grid-search tau; (c, a) linear given it
+            xs = [math.exp(-t / candidate) for t, _ in pts]
+            ys = [hr for _, hr in pts]
+            n = len(pts)
+            sx, sy = sum(xs), sum(ys)
+            denom = n * sum(x * x for x in xs) - sx * sx
+            if abs(denom) < 1e-9:
+                continue
+            a = (n * sum(x * y for x, y in zip(xs, ys)) - sx * sy) / denom
+            c = (sy - a * sx) / n
+            resid = sum((y - (c + a * x)) ** 2 for x, y in zip(xs, ys))
+            if a > 0 and (best_resid is None or resid < best_resid):
+                best_resid, tau = resid, candidate
+        if tau == hi:  # railed at the ceiling = "barely recovering", not a real constant
+            tau = None
+
+    if hrr30 is None and hrr60 is None and tau is None:
+        return None
+    return {"peak": peak, "hrr30": hrr30, "hrr60": hrr60, "tau": tau}
+
+
 def clamp_mph(mph: float) -> float:
     """Every daemon-commanded speed passes through here. The remote is hardware
     and beyond our reach; everything we send respects MAX_MPH."""
@@ -406,21 +454,17 @@ class Daemon:
                  duration / 60, steps, samples[-1].dist_m,
                  sum(1 for s in samples if s.hr), fit_path.name)
         hrs = [s.hr for s in samples if s.hr]
-        last_active = next((s for s in reversed(samples) if s.active), None)
-        hrr60 = None
-        if last_active and last_active.hr:
-            post = [s for s in samples if not s.active and s.hr
-                    and abs((s.t - last_active.t) - 60) <= 10]
-            if post:
-                nearest = min(post, key=lambda s: abs((s.t - last_active.t) - 60))
-                hrr60 = last_active.hr - nearest.hr
-                log.info("HRR60: %d bpm (%d -> %d)", hrr60, last_active.hr, nearest.hr)
+        recovery = recovery_analysis(samples)
+        if recovery:
+            log.info("recovery: HRR60=%s HRR30=%s tau=%s",
+                     recovery["hrr60"], recovery["hrr30"], recovery["tau"])
         early = sorted(s.hrv for s in samples if s.hrv and s.t - samples[0].t <= 150)
         hrv_baseline = round(early[len(early) // 2], 1) if early else None
         write_atomic(fit_path.with_suffix(".json"), json.dumps({
             "start": samples[0].t, "duration_s": round(duration),
             "dist_m": round(samples[-1].dist_m, 1), "steps": steps,
-            "hrr60": hrr60, "hrv_baseline": hrv_baseline,
+            "recovery": recovery, "hrr60": recovery and recovery["hrr60"],
+            "hrv_baseline": hrv_baseline,
             "kcal": round(samples[-1].kcal - samples[0].kcal),
             "hr_avg": round(sum(hrs) / len(hrs)) if hrs else None,
             "samples": [[round(s.t - samples[0].t, 1), round(s.speed_mps / MPH_TO_MPS, 2),

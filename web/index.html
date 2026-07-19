@@ -312,6 +312,11 @@
   <canvas id="rHr"></canvas>
   <div class="rlabel"><span class="swatch" style="background:var(--hrv)"></span>HRV · rMSSD ms</div>
   <canvas id="rHrv"></canvas>
+  <div id="recoveryBlock" hidden>
+    <div class="rlabel"><span class="swatch" style="background:var(--hr)"></span>Recovery · bpm after stop</div>
+    <div class="empty" id="recoveryStats"></div>
+    <canvas id="rRec"></canvas>
+  </div>
 </div>
 </section>
 
@@ -511,8 +516,9 @@ function draw(canvas, series, color, fmt, o = {}) {
 }
 
 let geo = { speed: null, hr: null, hrv: null, curve: null,
-            rspeed: null, rhr: null, rhrv: null };
-let reviewPts = null;  // past-session samples shown in the History review panel
+            rspeed: null, rhr: null, rhrv: null, rrec: null };
+let reviewPts = null;   // past-session samples shown in the History review panel
+let reviewMeta = null;  // that session's metadata (recovery, etc.)
 function noStepBands(pts, mphIdx, cadIdx) {
   // spans where the belt moved but steps didn't accumulate
   const bands = [];
@@ -539,6 +545,25 @@ function drawReview() {
                     { bands: noStepBands(reviewPts, 1, 5) });
   geo.rhr = draw($("rHr"), reviewPts.map(p => [p[0], p[2]]), css("--hr"), v => Math.round(v));
   geo.rhrv = draw($("rHrv"), reviewPts.map(p => [p[0], p[4] ?? null]), css("--hrv"), v => Math.round(v));
+  drawRecovery();
+}
+function drawRecovery() {
+  const rec = reviewMeta && reviewMeta.recovery;
+  const block = $("recoveryBlock");
+  // the decay curve = the inactive (belt-stopped) HR tail, re-based to seconds-after-stop
+  const lastActive = reviewPts.reduce((m, p, i) => p[3] ? i : m, -1);
+  const tail = lastActive >= 0
+    ? reviewPts.slice(lastActive).filter(p => p[2] != null).map(p => [p[0] - reviewPts[lastActive][0], p[2]])
+    : [];
+  if (!rec || tail.length < 3) { block.hidden = true; return; }
+  block.hidden = false;
+  const bits = [];
+  if (rec.hrr30 != null) bits.push(`HRR30 <b>${rec.hrr30}</b>`);
+  if (rec.hrr60 != null) bits.push(`HRR60 <b>${rec.hrr60}</b>`);
+  if (rec.tau != null) bits.push(`τ <b>${rec.tau}s</b>`);
+  $("recoveryStats").innerHTML = bits.join(" · ") + " <span style='opacity:.6'>(lower τ = faster recovery)</span>";
+  geo.rrec = draw($("rRec"), tail, css("--hr"), v => Math.round(v),
+                  { xy: true, dots: true, xfmt: t => t + "s" });
 }
 
 function hover(ev, canvas, g, unit, redraw) {
@@ -618,6 +643,7 @@ async function loadSessions() {
     row.querySelector('[data-a="view"]').onclick = async () => {
       const data = await (await fetch("/api/session?name=" + s.name)).json();
       reviewPts = data.samples;
+      reviewMeta = data;
       const d = new Date(s.start * 1000);
       $("reviewTitle").textContent =
         d.toLocaleDateString([], {month:"short", day:"numeric"}) + " " +
@@ -634,7 +660,7 @@ async function loadSessions() {
     el.appendChild(row);
   }
 }
-$("reviewClose").onclick = () => { $("reviewPanel").hidden = true; reviewPts = null; };
+$("reviewClose").onclick = () => { $("reviewPanel").hidden = true; reviewPts = reviewMeta = null; };
 
 // ---- programs ----
 function progRow(seg = { type: "hold" }) {

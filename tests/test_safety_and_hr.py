@@ -102,3 +102,52 @@ def test_on_hr_drops_artifact_rr(daemon):
 def test_on_hr_stale_marker(daemon):
     daemon.on_hr(None, bytearray(hr_packet(90)))
     assert time.time() - daemon.hr_last_seen < 1
+
+
+def _recovery_session(peak, floor, tau):
+    """A minute of walking at `peak` bpm, then 90 s of exponential HR decay."""
+    from math import exp
+    from fit_build import Sample
+    out, t = [], 0.0
+    for _ in range(60):
+        out.append(Sample(t=t, speed_mps=0.9, dist_m=0, steps=int(t) * 2, kcal=0,
+                          hr=peak, active=True)); t += 1
+    for k in range(90):
+        hr = round(floor + (peak - floor) * exp(-k / tau))
+        out.append(Sample(t=t, speed_mps=0.0, dist_m=0, steps=120, kcal=0,
+                          hr=hr, active=False)); t += 1
+    return out
+
+
+def test_recovery_recovers_hrr_and_tau():
+    rec = milltender.recovery_analysis(_recovery_session(150, 80, 40))
+    assert rec["peak"] == 150
+    assert 20 <= rec["hrr30"] <= 40      # a real drop
+    assert rec["hrr60"] > rec["hrr30"]
+    assert 25 <= rec["tau"] <= 60        # recovers the ~40 s constant it was built with
+
+
+def test_recovery_refuses_flat_signal():
+    # HR barely moves (walking intensity): tau must be None, no fabricated metric
+    rec = milltender.recovery_analysis(_recovery_session(92, 90, 40))
+    assert rec is None or rec["tau"] is None
+
+
+def test_recovery_dropout_does_not_fabricate_tau():
+    # a flat 90-bpm tail with one strap glitch reading 40 must not manufacture a
+    # time constant off that lone sample
+    from fit_build import Sample
+    s = _recovery_session(92, 90, 40)
+    for x in s:
+        if not x.active:
+            x.hr = 90
+    s[75].hr = 40  # single dropout mid-recovery
+    rec = milltender.recovery_analysis(s)
+    assert rec is None or rec["tau"] is None
+
+
+def test_recovery_none_without_belt_stop():
+    from fit_build import Sample
+    active_only = [Sample(t=i, speed_mps=0.9, dist_m=0, steps=i * 2, kcal=0, hr=100)
+                   for i in range(120)]
+    assert milltender.recovery_analysis(active_only) is None
