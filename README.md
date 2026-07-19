@@ -90,9 +90,9 @@ started before the daemon connected — totals are reconstructed from the base's
 counters), records everything, waits out a resume grace when you stop, captures
 a minute of recovery heart rate, uploads, and resets for next time.
 
-To run permanently on a Mac, edit the paths in `com.saul.milltender.plist`,
+To run permanently on a Mac, edit the paths in `lol.ssj.milltender.plist`,
 copy it to `~/Library/LaunchAgents/`, and
-`launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.saul.milltender.plist`.
+`launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/lol.ssj.milltender.plist`.
 On Linux, an equivalent systemd user service is a few lines.
 
 ## The dashboard

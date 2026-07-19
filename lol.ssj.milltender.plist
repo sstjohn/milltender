@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.saul.milltender</string>
+    <string>lol.ssj.milltender</string>
     <key>ProgramArguments</key>
     <array>
         <string>/Users/saul/src/treadmill/.venv/bin/python</string>
