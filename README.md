@@ -11,9 +11,12 @@ its own; your data lives in files on your machine.
 Built for the LifeSpan TX6 Glow-Up, whose stock app deserved replacing.
 
 <p align="center">
-  <img src="assets/dashboard-trends.png" alt="Trends: heart-rate-by-speed curve, weekly totals, per-session recovery and readiness" width="45%">
+  <img src="assets/dashboard-live.png" alt="Live tab during a walk: speed and heart-rate readouts, climbing speed/heart-rate/HRV graphs, and belt controls — a speed stepper, presets, and start/pause/stop" width="47%">
+</p>
+<p align="center">
+  <img src="assets/dashboard-trends.png" alt="Trends: heart-rate-by-speed curve, weekly totals, per-session recovery and readiness" width="47%">
   &nbsp;
-  <img src="assets/dashboard-history.png" alt="History: every session, reviewable and replayable" width="45%">
+  <img src="assets/dashboard-history.png" alt="History: every session, reviewable and replayable" width="47%">
 </p>
 
 ## Supported hardware
