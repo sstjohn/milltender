@@ -26,6 +26,29 @@ async def test_program_save_normalizes_all_segment_kinds(daemon):
     assert saved[4]["miles"] == 1.5
 
 
+async def test_program_runs_with_durationless_segments(daemon, monkeypatch):
+    """Ramp-to-a-speed and goal segments carry no 'minutes'; the loop must still run."""
+    async def tick():
+        return "tick"
+
+    async def no_stop_flow():
+        pass
+
+    monkeypatch.setattr(daemon, "_prog_tick", tick)
+    monkeypatch.setattr(daemon, "_stop_flow", no_stop_flow)
+    daemon.in_session = True
+    daemon.latest = {"state": milltender.ST_RUNNING, "speed_mph": 1.5}
+    daemon.dist_m = 99999
+    await daemon._program_loop("mix", [
+        {"type": "ramp", "rate_mph": 0.2, "per_s": 1, "until_mph": 2.0},
+        {"type": "goal", "mph": 2.0, "miles": 1.0},
+        {"type": "hold", "minutes": 0.05, "mph": 1.5},
+    ])
+    speeds = [p[2] for p in daemon.sent if p[:2] == bytes([0x53, 0x02])]
+    assert speeds[-1] == 15                             # reached the final hold
+    assert bytes([0x53, 0x03]) in daemon.sent           # program completed, belt stopped
+
+
 async def test_program_save_rejects_empty(daemon):
     with pytest.raises(web.HTTPBadRequest):
         await daemon.h_program_save(FakeRequest({"name": "x", "segments": []}))

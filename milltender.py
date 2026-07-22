@@ -819,8 +819,10 @@ class Daemon:
             self._program_loop(name, segments))
 
     async def _program_loop(self, name: str, segments: list[dict]) -> None:
-        log.info("program '%s': %d segments, %.1f min total", name, len(segments),
-                 sum(s["minutes"] for s in segments))
+        # ramps-to-a-speed and goal segments have no fixed duration, so the total
+        # is a floor, not a promise
+        log.info("program '%s': %d segments, %.1f+ min total", name, len(segments),
+                 sum(s.get("minutes", 0) for s in segments))
         try:
             if self.latest.get("state") != ST_RUNNING:
                 self.user_paused = False
