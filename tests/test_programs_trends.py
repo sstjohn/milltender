@@ -133,6 +133,21 @@ def test_trends_snapshot_windows_and_thresholds(daemon):
     assert snap30["curve_recent"] == [{"mph": 2.0, "bpm": 100}]
 
 
+def test_trends_snapshot_buckets_weekly(daemon):
+    from collections import Counter
+
+    now = time.time()
+    steady = [[200 + i, 2.0, 100, 1, None, 110] for i in range(60)]
+    starts = {"walk-a": now - 3600, "walk-b": now - 7200, "walk-c": now - 21 * 86400}
+    for name, start in starts.items():
+        _sidecar(name, start, 300, 480, steady)
+    weekly = daemon._trends_snapshot(now, 7)["weekly"]
+    assert [w["week"] for w in weekly] == sorted(w["week"] for w in weekly)  # oldest -> newest
+    expect = Counter(time.strftime("%G-W%V", time.localtime(s)) for s in starts.values())
+    assert Counter({w["week"]: w["sessions"] for w in weekly}) == expect
+    assert sum(w["steps"] for w in weekly) == 900 and sum(w["dist_m"] for w in weekly) == 1440
+
+
 def test_trends_snapshot_ignores_early_and_slow_samples(daemon):
     now = time.time()
     rows = ([[i, 2.0, 100, 1, None, 110] for i in range(150)]          # first 3 min: excluded

@@ -343,7 +343,25 @@
 
 <section data-tab="history" role="tabpanel" id="panel-history" aria-label="History" hidden>
 <div class="card panel" style="margin-top:0">
-  <div class="panel-head"><h2>History</h2></div>
+  <div class="panel-head"><h2>Weekly totals</h2><span class="from" id="wkFrom"></span></div>
+  <div class="chips" id="wkMetric">
+    <button data-m="miles" class="active">miles</button>
+    <button data-m="steps">steps</button>
+    <button data-m="hours">hours</button>
+    <button data-m="walks">walks</button>
+  </div>
+  <canvas id="cWeekly"></canvas>
+</div>
+<div class="card panel">
+  <div class="panel-head"><h2>History</h2>
+    <form id="importForm" class="importer">
+      <input id="importFile" type="file" accept=".fit,.json" multiple class="visually-hidden"
+             aria-label="Session file to import: a .fit and/or its .json sidecar">
+      <label class="btn-sm" for="importFile" id="importPick">Import…</label>
+      <button class="btn-sm" type="submit" id="importGo" hidden>Add</button>
+    </form>
+  </div>
+  <div class="empty" id="importMsg" hidden></div>
   <div id="histList" class="list"><div class="empty">no recorded sessions yet</div></div>
 </div>
 <div class="card panel" id="reviewPanel" hidden>
@@ -801,6 +819,33 @@ async function loadSessions() {
 }
 $("reviewClose").onclick = () => { $("reviewPanel").hidden = true; reviewPts = reviewMeta = null; };
 
+    loadSessions(); loadWeekly();
+  } else {
+let weekly = [], wkMetric = "miles";
+const wkMetrics = {
+  miles: { name: "Weekly miles", val: w => w.dist_m / 1609.34, fmt: v => v.toFixed(1) },
+  steps: { name: "Weekly steps", val: w => w.steps, fmt: v => Math.round(v).toLocaleString() },
+  hours: { name: "Weekly hours", val: w => w.seconds / 3600, fmt: v => v.toFixed(1) },
+  walks: { name: "Weekly walks", val: w => w.sessions, fmt: v => Math.round(v) },
+};
+function drawWeekly() {
+  const m = wkMetrics[wkMetric];
+  geo.weekly = draw($("cWeekly"), weekly.map((w, i) => [i, m.val(w)]), css("--hr"), m.fmt,
+                    { xy: true, dots: true, name: m.name,
+                      xfmt: i => (weekly[Math.round(i)]?.week || "").replace("-W", " w") });
+  $("wkFrom").textContent = weekly.length
+    ? `${weekly.length} week${weekly.length > 1 ? "s" : ""}` : "";
+}
+async function loadWeekly() {
+  try { weekly = (await (await fetch("/api/trends")).json()).weekly || []; } catch { return; }
+  drawWeekly();
+}
+for (const b of document.querySelectorAll("#wkMetric button")) b.onclick = () => {
+  wkMetric = b.dataset.m;
+  document.querySelectorAll("#wkMetric button").forEach(x => x.classList.toggle("active", x === b));
+  drawWeekly();
+};
+
 // ---- programs ----
 function progRow(seg = { type: "hold" }) {
   const div = document.createElement("div");
@@ -948,7 +993,7 @@ for (const b of document.querySelectorAll(".tabs button")) b.onclick = () => {
   location.replace("#" + b.dataset.tab);
   if (b.dataset.tab === "trends") loadTrends();
   if (b.dataset.tab === "live") drawAll();
-  if (b.dataset.tab === "history") drawReview();
+  if (b.dataset.tab === "history") { loadWeekly(); drawReview(); }
 };
 
 let winDays = 7;
@@ -1017,8 +1062,8 @@ setInterval(() => {
   if (!document.hidden && !document.querySelector('section[data-tab="live"]').hidden)
     pollHistory();
 }, 3000); pollHistory();
-addEventListener("resize", () => { drawAll(); drawReview(); });
-matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { drawAll(); drawReview(); });
+addEventListener("resize", () => { drawAll(); drawReview(); drawWeekly(); });
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { drawAll(); drawReview(); drawWeekly(); });
 </script>
 </body>
 </html>

@@ -705,6 +705,7 @@ class Daemon:
         recent_b: dict[float, list[float]] = {}
         week = {"dist_m": 0.0, "steps": 0, "seconds": 0, "sessions": 0}
         alltime = {"dist_m": 0.0, "steps": 0, "seconds": 0, "sessions": 0}
+        weekly: dict[str, dict] = {}
         sessions = []
         for sidecar in sorted(SESSIONS_DIR.glob("walk-*.json")):
             try:
@@ -712,14 +713,20 @@ class Daemon:
             except Exception:  # noqa: BLE001
                 continue
             start = meta.get("start") or 0
-            for agg, cond in ((alltime, True), (week, start >= now - 7 * 86400)):
+            bucket = start and weekly.setdefault(
+                time.strftime("%G-W%V", time.localtime(start)),
+                {"dist_m": 0.0, "steps": 0, "seconds": 0, "sessions": 0})
+            for agg, cond in ((alltime, True), (week, start >= now - 7 * 86400),
+                              (bucket, bucket)):
                 if cond:
                     agg["dist_m"] += meta.get("dist_m") or 0
                     agg["steps"] += meta.get("steps") or 0
-                    agg["seconds"] += meta.get("duration_s") or 0
+                    # surface moving time; older sidecars predate it, so fall back
+                    agg["seconds"] += meta.get("moving_s") or meta.get("duration_s") or 0
                     agg["sessions"] += 1
             sessions.append({"start": start, "duration_s": meta.get("duration_s"),
-                             "dist_m": meta.get("dist_m"), "hrr60": meta.get("hrr60"),
+                             "moving_s": meta.get("moving_s"), "dist_m": meta.get("dist_m"),
+                             "hrr60": meta.get("hrr60"),
                              "hrv_baseline": meta.get("hrv_baseline")})
             in_window = start >= cutoff
             for p in meta.get("samples", []):
@@ -735,6 +742,7 @@ class Daemon:
 
         return {"curve_all": curve(all_b, 120), "curve_recent": curve(recent_b, 60),
                 "days": days, "week": week, "all": alltime,
+                "weekly": [{"week": k, **weekly[k]} for k in sorted(weekly)],
                 "recent": sessions[-14:][::-1]}
 
     async def h_trends(self, req: web.Request) -> web.Response:
