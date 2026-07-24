@@ -30,6 +30,9 @@ from dotenv import load_dotenv
 
 import uploads
 from fit_build import Sample, build_fit, cadence_series
+from fit_tool.fit_file import FitFile
+from fit_tool.profile.messages.record_message import RecordMessage
+from fit_tool.profile.messages.session_message import SessionMessage
 
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
@@ -192,6 +195,28 @@ def write_atomic(path: Path, text: str) -> None:
     os.replace(tmp, path)
 
 
+def reconstruct_sidecar(fit_bytes: bytes) -> dict:
+    """Rebuild a session sidecar from a FIT — the inverse of build_fit, for imports.
+    Records carry time/speed/distance/HR/cadence and the session summary carries the
+    step total; what a FIT can't hold (HRV, recovery, drift, kcal) comes back null."""
+    fit = FitFile.from_bytes(fit_bytes)
+    recs = [r.message for r in fit.records
+            if isinstance(r.message, RecordMessage) and r.message.timestamp is not None]
+    if len(recs) < 2:
+        raise ValueError("no usable records")
+    session = next((r.message for r in fit.records
+                    if isinstance(r.message, SessionMessage)), None)
+    t0 = recs[0].timestamp / 1000
+    active = [bool(m.speed and m.speed > 0.05) for m in recs]
+    samples = [Sample(t=m.timestamp / 1000, speed_mps=m.speed or 0.0, dist_m=m.distance or 0.0,
+                      steps=0, kcal=0.0, hr=m.heart_rate, active=a)
+               for m, a in zip(recs, active)]
+    hrs = [m.heart_rate for m in recs if m.heart_rate]
+    dist_m = recs[-1].distance if recs[-1].distance is not None \
+        else (session.total_distance if session else 0.0)
+    steps = round(session.total_strides * 2) if session and session.total_strides else 0
+    return {
+        "start": t0, "duration_s": round(samples[-1].t - t0),
         "moving_s": round(moving_seconds(samples)),
         "dist_m": round(dist_m or 0.0, 1), "steps": steps,
         "recovery": None, "hrr60": None, "drift_pct": None, "hrv_baseline": None,
@@ -584,6 +609,7 @@ class Daemon:
         app.router.add_get("/api/trends", self.h_trends)
         app.router.add_get("/api/sessions", self.h_sessions)
         app.router.add_get("/api/session", self.h_session)
+        app.router.add_post("/api/import", self.h_import)
         app.router.add_get("/api/programs", self.h_programs)
         app.router.add_post("/api/programs", self.h_program_save)
         app.router.add_post("/api/program/delete", self.h_program_delete)
@@ -806,6 +832,53 @@ class Daemon:
         if not name.startswith("walk-") or not path.exists():
             raise web.HTTPNotFound
         return web.Response(text=path.read_text(), content_type="application/json")
+
+    async def h_import(self, req: web.Request) -> web.Response:
+        """Store a session uploaded from the browser — a sidecar .json (full fidelity)
+        and/or its .fit (reconstructed) — the inverse of the per-session fit download."""
+        files: dict[str, bytes] = {}
+        try:
+            reader = await req.multipart()
+            async for part in reader:
+                ext = Path(part.filename or "").suffix.lower()
+                if ext in (".json", ".fit"):
+                    files[ext] = await part.read()
+        except Exception:  # noqa: BLE001
+            raise web.HTTPBadRequest(text="expected multipart/form-data")
+        if not files:
+            raise web.HTTPBadRequest(text="upload a .fit and/or its .json sidecar")
+        fit_bytes = files.get(".fit")
+        if ".json" in files:
+            try:
+                meta = json.loads(files[".json"])
+            except Exception:  # noqa: BLE001
+                raise web.HTTPBadRequest(text="sidecar is not valid JSON")
+            if not all(k in meta for k in ("start", "duration_s", "steps", "dist_m", "samples")) \
+                    or not isinstance(meta["samples"], list):
+                raise web.HTTPBadRequest(text="sidecar is missing required fields")
+        else:
+            try:
+                meta = reconstruct_sidecar(fit_bytes)
+            except Exception as exc:  # noqa: BLE001
+                raise web.HTTPBadRequest(text=f"could not read FIT: {exc}")
+        start = meta["start"]
+        if isinstance(start, bool) or not isinstance(start, (int, float)):
+            raise web.HTTPBadRequest(text="sidecar 'start' must be an epoch timestamp")
+        base = time.strftime("walk-%Y%m%d-%H%M%S", time.localtime(start))
+        stem, n = base, 1
+        while (SESSIONS_DIR / f"{stem}.json").exists() or (SESSIONS_DIR / f"{stem}.fit").exists():
+            n += 1
+            stem = f"{base}-{n}"
+        SESSIONS_DIR.mkdir(exist_ok=True)
+        write_atomic(SESSIONS_DIR / f"{stem}.json", json.dumps(meta))
+        if fit_bytes is not None:
+            fit_path = SESSIONS_DIR / f"{stem}.fit"
+            tmp = fit_path.with_suffix(".fit.tmp")
+            tmp.write_bytes(fit_bytes)
+            os.replace(tmp, fit_path)
+        log.info("imported session %s (%s)", stem, "fit+sidecar" if fit_bytes else "sidecar")
+        return web.json_response({"name": stem, "start": start, "steps": meta.get("steps"),
+                                  "dist_m": meta.get("dist_m"), "has_fit": fit_bytes is not None})
 
     def _load_programs(self) -> dict:
         try:

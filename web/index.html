@@ -121,6 +121,8 @@
   .panel-head .now { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
   .panel-head .now span { color: var(--muted); font-weight: 400; font-size: 11px; }
   .panel-head .from { font-size: 11px; color: var(--muted); }
+  .importer { display: flex; gap: 6px; align-items: center; }
+  .importer label { margin: 0; }
   canvas { width: 100%; height: 120px; display: block; touch-action: none; }
 
   .controls { margin-top: 14px; display: grid; gap: 10px; }
@@ -821,8 +823,36 @@ async function loadSessions() {
 }
 $("reviewClose").onclick = () => { $("reviewPanel").hidden = true; reviewPts = reviewMeta = null; };
 
+// ---- import ----
+const importFile = $("importFile"), importPick = $("importPick"),
+      importGo = $("importGo"), importMsg = $("importMsg");
+importFile.onchange = () => {
+  const names = [...importFile.files].map(f => f.name);
+  importPick.textContent = names.length ? names.join(" + ") : "Import…";
+  importGo.hidden = !names.length;
+};
+$("importForm").onsubmit = async e => {
+  e.preventDefault();
+  if (!importFile.files.length) return;
+  const body = new FormData();
+  for (const f of importFile.files) body.append("file", f);
+  importGo.disabled = true;
+  let res;
+  try { res = await fetch("/api/import", { method: "POST", body }); } catch {}
+  importGo.disabled = false;
+  importMsg.hidden = false;
+  if (res && res.ok) {
+    const s = await res.json();
+    importMsg.textContent = `Imported ${s.name} · ${(s.dist_m / 1609.34).toFixed(2)} mi · ${s.steps} steps`;
+    $("importForm").reset();
+    importPick.textContent = "Import…";
+    importGo.hidden = true;
     loadSessions(); loadWeekly();
   } else {
+    importMsg.textContent = res ? await res.text() : "Import failed";
+  }
+};
+
 let weekly = [], wkMetric = "miles";
 const wkMetrics = {
   miles: { name: "Weekly miles", val: w => w.dist_m / 1609.34, fmt: v => v.toFixed(1) },
