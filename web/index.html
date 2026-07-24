@@ -426,7 +426,7 @@ function render() {
 
   $("vSpeed").textContent = running && status.speed_mph != null ? status.speed_mph.toFixed(1) : "–";
   $("vHr").textContent = status.hr ?? "–";
-  $("vTime").textContent = fmtTime(status.in_session ? status.elapsed_s : null);
+  $("vTime").textContent = fmtTime(status.in_session ? status.moving_s : null);
   $("vDist").firstChild.textContent = status.in_session && status.dist_m != null ? (status.dist_m / 1609.34).toFixed(2) : "–";
   $("vSteps").textContent = status.in_session ? (status.steps ?? "–") : "–";
   $("vCad").firstChild.textContent = status.in_session && status.cadence_spm != null
@@ -792,7 +792,7 @@ async function loadSessions() {
     row.className = "row";
     row.innerHTML = `<div class="meta"><div>${d.toLocaleDateString([], {month:"short", day:"numeric"})}
         ${d.toLocaleTimeString([], {hour:"numeric", minute:"2-digit"})}</div>
-      <div class="sub2">${fmtTime(s.duration_s)} · ${(s.dist_m/1609.34).toFixed(2)} mi · ${s.steps} steps${s.hr_avg ? " · ♥ " + s.hr_avg : ""}${s.hrr60 ? " · HRR60 " + s.hrr60 : ""}</div></div>
+      <div class="sub2">${fmtTime(s.moving_s ?? s.duration_s)} · ${(s.dist_m/1609.34).toFixed(2)} mi · ${s.steps} steps${s.hr_avg ? " · ♥ " + s.hr_avg : ""}${s.hrr60 ? " · HRR60 " + s.hrr60 : ""}</div></div>
       <button class="btn-sm" data-a="view">view</button>
       <button class="btn-sm" data-a="replay">replay</button>
       <a class="btn-sm" style="text-decoration:none" href="${s.fit}" download>fit</a>`;
@@ -801,10 +801,12 @@ async function loadSessions() {
       reviewPts = data.samples;
       reviewMeta = data;
       const d = new Date(s.start * 1000);
+      const mv = s.moving_s ?? s.duration_s;
+      const paused = s.duration_s != null && mv != null && s.duration_s - mv >= 60;
       $("reviewTitle").textContent =
         d.toLocaleDateString([], {month:"short", day:"numeric"}) + " " +
         d.toLocaleTimeString([], {hour:"numeric", minute:"2-digit"}) +
-        " · " + fmtTime(s.duration_s);
+        " · " + fmtTime(mv) + (paused ? ` moving · ${fmtTime(s.duration_s)} elapsed` : "");
       $("reviewPanel").hidden = false;
       drawReview();
       $("reviewPanel").scrollIntoView({

@@ -12,6 +12,23 @@ async def test_running_frame_starts_session(daemon):
     assert daemon.latest["speed_mph"] == 1.0
 
 
+def test_moving_time_excludes_pauses_and_disconnects(daemon):
+    from fit_build import Sample
+
+    def seg(t0, n, active):
+        return [Sample(t=t0 + i, speed_mps=0.7 if active else 0.0, dist_m=0.0,
+                       steps=0, kcal=0.0, hr=90, active=active) for i in range(n)]
+
+    daemon.samples = (seg(0, 60, True)         # 60 s walking
+                      + seg(60, 120, False)    # 120 s paused (belt stopped, HR-only)
+                      + seg(180, 30, True)     # 30 s walking
+                      + seg(500, 20, True))    # 291 s disconnect hole, then 20 s
+    daemon.in_session = True
+    # 109 s of belt motion; the pause and the hole are both skipped
+    assert daemon._moving_s(now=520) == 109
+    assert 520 - daemon.samples[0].t == 520  # vs total wall clock, way over
+
+
 async def test_backfill_reconstructs_missed_walking(daemon):
     # joined 10 min into a real walk: 600 s, 620 steps, 0.186 mi
     feed(daemon, status_frame(state=3, speed_raw=10, elapsed=600, dist_raw=186, steps=620))

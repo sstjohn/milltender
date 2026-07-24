@@ -148,6 +148,18 @@ def test_trends_snapshot_buckets_weekly(daemon):
     assert sum(w["steps"] for w in weekly) == 900 and sum(w["dist_m"] for w in weekly) == 1440
 
 
+def test_trends_seconds_prefers_moving_with_elapsed_fallback(daemon):
+    now = time.time()
+    (milltender.SESSIONS_DIR / "walk-mv.json").write_text(json.dumps({
+        "start": now - 3600, "duration_s": 1000, "moving_s": 700,
+        "dist_m": 480, "steps": 300, "samples": []}))
+    (milltender.SESSIONS_DIR / "walk-legacy.json").write_text(json.dumps({
+        "start": now - 3 * 86400, "duration_s": 900,  # predates moving_s
+        "dist_m": 100, "steps": 50, "samples": []}))
+    week = daemon._trends_snapshot(now, 7)["week"]
+    assert week["seconds"] == 700 + 900  # moving where present, elapsed where not
+
+
 def test_trends_snapshot_ignores_early_and_slow_samples(daemon):
     now = time.time()
     rows = ([[i, 2.0, 100, 1, None, 110] for i in range(150)]          # first 3 min: excluded

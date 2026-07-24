@@ -93,6 +93,14 @@ def entry_mph(seg: dict) -> float | None:
     return clamp_mph(seg["mph"]) if seg.get("type", "hold") in ("hold", "goal") else None
 
 
+def moving_seconds(samples: list[Sample]) -> float:
+    """Belt-moving time: the gaps between active samples, skipping paused stretches
+    (inactive HR-only samples) and disconnect holes (>15 s). This is what a walk
+    'took'; total wall clock would fold in bathroom breaks and dropouts."""
+    return sum(b.t - a.t for a, b in zip(samples, samples[1:])
+               if a.active and b.t - a.t < 15)
+
+
 def recovery_analysis(samples: list[Sample]) -> dict | None:
     """Heart-rate recovery after the belt stops: HRR at 30 and 60 s, and the
     exponential decay time constant tau (lower = faster recovery). The signal is
@@ -182,6 +190,16 @@ def write_atomic(path: Path, text: str) -> None:
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(text)
     os.replace(tmp, path)
+
+
+        "moving_s": round(moving_seconds(samples)),
+        "dist_m": round(dist_m or 0.0, 1), "steps": steps,
+        "recovery": None, "hrr60": None, "drift_pct": None, "hrv_baseline": None,
+        "kcal": None, "hr_avg": round(sum(hrs) / len(hrs)) if hrs else None,
+        "samples": [[round(m.timestamp / 1000 - t0, 1), round((m.speed or 0.0) / MPH_TO_MPS, 2),
+                     m.heart_rate, int(a), None, (m.cadence or 0) * 2]
+                    for m, a in zip(recs, active)],
+    }
 
 
 class Daemon:
@@ -495,6 +513,7 @@ class Daemon:
         if len(samples) < 2:
             return
         duration = samples[-1].t - samples[0].t
+        moving = moving_seconds(samples)
         steps = samples[-1].steps - samples[0].steps
         if duration < MIN_SESSION_S or steps < MIN_SESSION_STEPS:
             log.info("discarding tiny session (%.0fs, %d steps)", duration, steps)
@@ -515,9 +534,9 @@ class Daemon:
                                         "rr_events": rr}))
             log.exception("FIT build failed — raw session dumped to %s", dump)
             return
-        log.info("session ended: %.1f min, %d steps, %.0f m, hr samples: %d -> %s",
-                 duration / 60, steps, samples[-1].dist_m,
-                 sum(1 for s in samples if s.hr), fit_path.name)
+        log.info("session ended: %.1f min moving / %.1f elapsed, %d steps, %.0f m, "
+                 "hr samples: %d -> %s", moving / 60, duration / 60, steps,
+                 samples[-1].dist_m, sum(1 for s in samples if s.hr), fit_path.name)
         hrs = [s.hr for s in samples if s.hr]
         recovery = recovery_analysis(samples)
         drift = cardiac_drift(samples)
@@ -530,6 +549,7 @@ class Daemon:
         hrv_baseline = round(early[len(early) // 2], 1) if early else None
         write_atomic(fit_path.with_suffix(".json"), json.dumps({
             "start": samples[0].t, "duration_s": round(duration),
+            "moving_s": round(moving),
             "dist_m": round(samples[-1].dist_m, 1), "steps": steps,
             "recovery": recovery, "hrr60": recovery and recovery["hrr60"],
             "drift_pct": drift, "hrv_baseline": hrv_baseline,
@@ -580,12 +600,24 @@ class Daemon:
     async def h_index(self, _req: web.Request) -> web.FileResponse:
         return web.FileResponse(Path(__file__).resolve().parent / "web" / "index.html")
 
+    def _moving_s(self, now: float) -> int | None:
+        """Live moving time: moving_seconds over the session so far, plus the tail
+        from the last sample to now so the tile ticks in real time while walking."""
+        s = self.samples
+        if not s:
+            return None
+        total = moving_seconds(s)
+        if s[-1].active and now - s[-1].t < 15:
+            total += now - s[-1].t
+        return round(total)
+
     async def h_status(self, _req: web.Request) -> web.Response:
         now = time.time()
         return web.json_response({
             **self.latest,
             "connected": self.client is not None,
             "in_session": self.in_session,
+            "moving_s": self._moving_s(now) if self.in_session else None,
             "hr": self.latest_hr if now - self.hr_last_seen < 10 else None,
             "hr_connected": now - self.hr_last_seen < 10,
             "grace_s_left": (max(0, round(GRACE_S - (now - self.pending_end_t)))
@@ -761,7 +793,8 @@ class Daemon:
             except Exception:  # noqa: BLE001
                 continue
             out.append({"name": sidecar.stem, "start": meta.get("start"),
-                        "duration_s": meta.get("duration_s"), "dist_m": meta.get("dist_m"),
+                        "duration_s": meta.get("duration_s"),
+                        "moving_s": meta.get("moving_s"), "dist_m": meta.get("dist_m"),
                         "steps": meta.get("steps"), "hr_avg": meta.get("hr_avg"),
                         "hrr60": meta.get("hrr60"),
                         "fit": f"/sessions/{sidecar.stem}.fit"})
