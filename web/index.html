@@ -643,15 +643,17 @@ function draw(canvas, series, color, fmt, o = {}) {
   return { x, y, pts, xfmt: o.xfmt };
 }
 
-let geo = { speed: null, hr: null, hrv: null, curve: null,
+let geo = { speed: null, hr: null, hrv: null, curve: null, weekly: null,
             rspeed: null, rhr: null, rhrv: null, rrec: null };
 let reviewPts = null;   // past-session samples shown in the History review panel
 let reviewMeta = null;  // that session's metadata (recovery, etc.)
 function noStepBands(pts, mphIdx, cadIdx) {
-  // spans where the belt moved but steps didn't accumulate
+  // spans where the belt moved but nobody was walking it (straddling the rails).
+  // Off-mill reads ~0 spm; a slow 0.4 mph shuffle still turns ~20+, so the cutoff
+  // sits in the gap between them — not up at walking cadence, which flagged the crawl.
   const bands = [];
   for (const p of pts) {
-    if (p[mphIdx] > 0.2 && (p[cadIdx] ?? 99) < 20) {
+    if (p[mphIdx] > 0.2 && (p[cadIdx] ?? 99) < 10) {
       if (bands.length && p[0] - bands[bands.length - 1][1] < 6) bands[bands.length - 1][1] = p[0];
       else bands.push([p[0], p[0]]);
     }
