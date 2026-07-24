@@ -49,6 +49,38 @@ async def test_program_runs_with_durationless_segments(daemon, monkeypatch):
     assert bytes([0x53, 0x03]) in daemon.sent           # program completed, belt stopped
 
 
+async def test_cue_counts_down_only_into_a_real_speed_change(daemon):
+    daemon._prog_speed = 1.5
+    daemon._prog_cue_to = 2.7
+    for left, expect in ((10, None), (3, 3), (2.4, 3), (1, 1)):
+        daemon._prog_report("p", 0, 2, left)
+        cue = daemon.program_status.get("cue")
+        assert (cue or {}).get("in_s") == expect, f"left={left}"
+    assert daemon.program_status["cue"]["to_mph"] == 2.7
+
+    daemon._prog_cue_to = 1.5  # next segment holds the speed we're already at
+    daemon._prog_report("p", 0, 2, 2)
+    assert "cue" not in daemon.program_status
+
+    daemon._prog_cue_to = None  # a ramp: drifts rather than jumps
+    daemon._prog_report("p", 0, 2, 2)
+    assert "cue" not in daemon.program_status
+
+
+async def test_cue_chimes_once_per_second_then_once_on_the_change(daemon, monkeypatch):
+    played = []
+    monkeypatch.setattr(daemon, "chime", played.append)
+    daemon._prog_speed = 1.5
+    daemon._prog_cue_to = 2.7
+    for left in (3, 3, 2, 2, 1):  # a paused clock re-reports the same second
+        daemon._prog_report("p", 0, 2, left)
+    assert played == ["count"] * 3
+    daemon._set_prog_speed(2.7)
+    assert played == ["count"] * 3 + ["change"]
+    daemon._set_prog_speed(2.7)  # no jump, no tone
+    assert played.count("change") == 1
+
+
 async def test_program_save_rejects_empty(daemon):
     with pytest.raises(web.HTTPBadRequest):
         await daemon.h_program_save(FakeRequest({"name": "x", "segments": []}))

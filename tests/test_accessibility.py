@@ -98,6 +98,22 @@ def test_static_controls_have_accessible_names():
             assert name, f"control without an accessible name: {e['attrs']}"
 
 
+def test_countdown_cue_announces_once_not_per_tick():
+    els = elements()
+    overlay = next(e for e in els if e["attrs"].get("id") == "cue")
+    assert overlay["attrs"].get("aria-hidden") == "true", \
+        "the giant digit is decoration; announcing it every second would flood"
+    sr = next(e for e in els if e["attrs"].get("id") == "cueSr")
+    assert sr["attrs"].get("role") == "status" and "aria-live" in sr["attrs"]
+
+
+def test_chime_toggles_report_their_state():
+    ids = {e["attrs"].get("id"): e for e in elements()}
+    for tid in ("chimeHere", "chimeMac"):
+        assert ids[tid]["tag"] == "button", f"{tid} must be a real button"
+        assert "aria-pressed" in ids[tid]["attrs"], f"{tid} must expose on/off"
+
+
 def test_every_chart_is_labelled():
     canvases = [e for e in elements() if e["tag"] == "canvas"]
     assert canvases, "expected chart canvases"

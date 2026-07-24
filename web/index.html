@@ -32,7 +32,8 @@
     max-width: 560px; margin: 0 auto; padding: 16px 14px 28px;
   }
 
-  header { display: flex; align-items: baseline; gap: 10px; padding: 2px 2px 14px; }
+  header { display: flex; align-items: baseline; gap: 10px; padding: 2px 2px 14px;
+    flex-wrap: wrap; }
   header h1 { font-size: 17px; font-weight: 700; letter-spacing: -0.01em; }
   header .sub { font-size: 12px; color: var(--muted); flex: 1; }
   .pills { display: flex; gap: 6px; }
@@ -44,6 +45,8 @@
   }
   .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--axis); flex: none; }
   .dot.on { background: var(--good); }
+  button.pill { cursor: pointer; font-family: inherit; }
+  button.pill[aria-pressed="false"] { color: var(--muted); text-decoration: line-through; }
 
   .tabs {
     display: flex; gap: 4px; margin-bottom: 12px;
@@ -66,6 +69,27 @@
   }
   .banner.show { display: flex; }
   .banner b { font-variant-numeric: tabular-nums; }
+
+  #cue {
+    position: fixed; inset: 0; z-index: 40; display: none;
+    place-content: center; text-align: center;
+    background: color-mix(in srgb, var(--page) 88%, transparent);
+    backdrop-filter: blur(3px);
+  }
+  #cue.show { display: grid; }
+  #cue .count {
+    font-size: clamp(88px, 34vw, 200px); font-weight: 800; line-height: 0.9;
+    letter-spacing: -0.04em; font-variant-numeric: tabular-nums;
+    color: var(--warning); animation: cuePulse 1s ease-out;
+  }
+  #cue .to { font-size: clamp(26px, 9vw, 44px); font-weight: 700; margin-top: 14px; }
+  #cue .from { font-size: 14px; color: var(--muted); margin-top: 8px; }
+  #cue .to .unit { font-size: 0.5em; color: var(--muted); font-weight: 600; }
+  @keyframes cuePulse { from { transform: scale(1.18); opacity: 0.5 } to { transform: none } }
+  @media (prefers-reduced-motion: reduce) {
+    #cue { backdrop-filter: none; }
+    #cue .count { animation: none; }
+  }
 
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .card {
@@ -194,6 +218,10 @@
 <header>
   <h1>milltender</h1><span class="sub">TX6</span>
   <div class="pills">
+    <button class="pill" id="chimeHere" aria-pressed="true"
+            title="Countdown beeps from this browser">♪ here</button>
+    <button class="pill" id="chimeMac" aria-pressed="true"
+            title="Countdown beeps from the Mac running milltender">♪ mac</button>
     <span class="pill" id="strapPill"><span id="hrDot" class="dot" aria-hidden="true"></span>strap</span>
     <span class="pill" id="tmPill"><span id="tmDot" class="dot" aria-hidden="true"></span><span id="stateTxt">–</span></span>
   </div>
@@ -207,6 +235,15 @@
 </nav>
 
 <div id="grace" class="banner">⏸ Belt stopped — uploading in <b id="graceT">–</b> unless you resume</div>
+
+<div id="cue" aria-hidden="true">
+  <div>
+    <div class="count" id="cueCount">3</div>
+    <div class="to" id="cueTo"></div>
+    <div class="from" id="cueFrom"></div>
+  </div>
+</div>
+<p id="cueSr" class="visually-hidden" role="status" aria-live="assertive"></p>
 
 <section data-tab="live" role="tabpanel" id="panel-live" aria-label="Live">
 <div class="grid">
@@ -415,6 +452,8 @@ function render() {
   if (bT) bT.textContent = tick;
   const bL = document.getElementById("bL");
   if (bL && prog) bL.textContent = prog.label;
+  renderCue(prog);
+  $("chimeMac").setAttribute("aria-pressed", String(!!status.chime_local));
 
   $("start").disabled = !status.connected || running;
   $("start").textContent = (paused || g != null) ? "▸ Resume" : "▸ Start";
@@ -428,6 +467,74 @@ function render() {
       Math.abs(parseFloat(b.dataset.mph) - status.speed_mph) < 0.05);
   }
 }
+
+// ---- speed-change countdown: beep beep beep beeeep ----
+const chime = {
+  on: localStorage.getItem("chimeHere") !== "0",
+  ctx: null,
+  beep(long) {
+    if (!this.on) return;
+    this.ctx ??= new (window.AudioContext || window.webkitAudioContext)();
+    if (this.ctx.state === "suspended") this.ctx.resume();
+    const t = this.ctx.currentTime, dur = long ? 0.65 : 0.11;
+    const osc = this.ctx.createOscillator(), gain = this.ctx.createGain();
+    osc.frequency.value = long ? 1320 : 880;
+    gain.gain.setValueAtTime(0, t);                       // taper both ends,
+    gain.gain.linearRampToValueAtTime(0.35, t + 0.008);   // else the speaker pops
+    gain.gain.setValueAtTime(0.35, t + dur - 0.02);
+    gain.gain.linearRampToValueAtTime(0, t + dur);
+    osc.connect(gain).connect(this.ctx.destination);
+    osc.start(t); osc.stop(t + dur);
+  },
+};
+
+let cueKey = null, cueArmed = false;
+
+function renderCue(prog) {
+  const cue = prog && prog.cue;
+  if (!cue) {
+    // the cue vanishing means the change just landed — that's the long beep
+    if (cueArmed) { chime.beep(true); $("cueSr").textContent = "Speed changed."; }
+    cueArmed = false; cueKey = null;
+    $("cue").classList.remove("show");
+    return;
+  }
+  const dest = cue.to_mph > 0 ? `${cue.to_mph.toFixed(1)} mph` : "a stop";
+  const key = `${prog.seg}:${cue.in_s}`;
+  if (key !== cueKey) {
+    cueKey = key;
+    chime.beep(false);
+    const count = $("cueCount");
+    count.textContent = cue.in_s;
+    count.style.animation = "none"; void count.offsetWidth; count.style.animation = "";
+    if (!cueArmed) $("cueSr").textContent = `Changing to ${dest} in ${cue.in_s} seconds.`;
+  }
+  cueArmed = true;
+  $("cueTo").innerHTML = cue.to_mph > 0
+    ? `${cue.to_mph.toFixed(1)}<span class="unit"> mph</span>` : "Stopping";
+  $("cueFrom").textContent = `from ${(prog.mph ?? 0).toFixed(1)} mph`;
+  $("cue").classList.add("show");
+}
+
+$("chimeHere").onclick = (e) => {
+  chime.on = !chime.on;
+  localStorage.setItem("chimeHere", chime.on ? "1" : "0");
+  e.currentTarget.setAttribute("aria-pressed", String(chime.on));
+  chime.beep(true);  // both confirms the choice and unlocks audio on the way in
+};
+
+$("chimeHere").setAttribute("aria-pressed", String(chime.on));
+// browsers keep audio muted until a gesture; spend the first one we get
+addEventListener("pointerdown", () => {
+  chime.ctx ??= new (window.AudioContext || window.webkitAudioContext)();
+  chime.ctx.resume();
+}, { once: true });
+
+$("chimeMac").onclick = async (e) => {
+  const on = e.currentTarget.getAttribute("aria-pressed") !== "true";
+  await fetch("/api/chime", { method: "POST", body: JSON.stringify({ on, test: true }) });
+  e.currentTarget.setAttribute("aria-pressed", String(on));
+};
 
 async function pollStatus() {
   try { status = await (await fetch("/api/status")).json(); }

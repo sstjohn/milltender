@@ -19,7 +19,9 @@ import logging
 import math
 import os
 import signal
+import tempfile
 import time
+import wave
 from pathlib import Path
 
 from aiohttp import web
@@ -47,6 +49,8 @@ GRACE_S = int(os.environ.get("GRACE_S", "180"))  # resume window after belt stop
 RECOVERY_S = int(os.environ.get("RECOVERY_S", "60"))  # HR capture after deliberate stop
 MIN_SESSION_S = 60
 MIN_SESSION_STEPS = 20
+CUE_LEAD_S = 3  # countdown before a programmed speed change: beep beep beep beeeep
+CHIME_LOCAL = os.environ.get("CHIME", "1") != "0"  # tones from the daemon host's speakers
 SESSIONS_DIR = Path(__file__).resolve().parent / "sessions"
 PROGRAMS_FILE = Path(__file__).resolve().parent / "programs.json"
 
@@ -61,6 +65,32 @@ def frame(payload: bytes) -> bytes:
     for b in payload:
         xor ^= b
     return bytes([0x02, *payload, xor, 0x03])
+
+
+def chime_wav(kind: str) -> Path:
+    """Render a countdown tone to disk: afplay wants a file and macOS ships no
+    tone generator. Rendered once per boot, then reused."""
+    hz, ms = (1320.0, 650) if kind == "change" else (880.0, 110)
+    path = Path(tempfile.gettempdir()) / f"milltender-{kind}.wav"
+    if not path.exists():
+        rate = 44100
+        n = round(rate * ms / 1000)
+        edge = round(rate * 0.008)  # taper the ends or the speaker pops
+        pcm = bytearray()
+        for i in range(n):
+            gain = 0.4 * min(1.0, i / edge, (n - i) / edge)
+            pcm += round(gain * 32767 * math.sin(2 * math.pi * hz * i / rate)) \
+                .to_bytes(2, "little", signed=True)
+        with wave.open(str(path), "wb") as w:
+            w.setparams((1, 2, rate, n, "NONE", "not compressed"))
+            w.writeframes(pcm)
+    return path
+
+
+def entry_mph(seg: dict) -> float | None:
+    """The speed a segment jumps to the instant it starts, or None when it just
+    picks up from wherever the belt already is (ramps and HR-following)."""
+    return clamp_mph(seg["mph"]) if seg.get("type", "hold") in ("hold", "goal") else None
 
 
 def recovery_analysis(samples: list[Sample]) -> dict | None:
@@ -170,6 +200,10 @@ class Daemon:
         self.user_paused = False  # explicit UI pause: hold session open, no grace timer
         self.program_task: asyncio.Task | None = None
         self.program_status: dict | None = None  # {name, seg, total, seg_left_s}
+        self.chime_local = CHIME_LOCAL
+        self._prog_cue_to: float | None = None  # speed the next segment jumps to
+        self._chimed: tuple | None = None  # (segment, count) already sounded
+        self._chime_task: asyncio.Task | None = None
         self.recovery_until: float | None = None
         self.stop_task: asyncio.Task | None = None
         self.hr_baseline: dict[float, float] = {}  # mph -> typical bpm, from archive
@@ -536,6 +570,7 @@ class Daemon:
         app.router.add_post("/api/program/run", self.h_program_run)
         app.router.add_post("/api/program/cancel", self.h_program_cancel)
         app.router.add_post("/api/replay", self.h_replay)
+        app.router.add_post("/api/chime", self.h_chime)
         app.router.add_static("/sessions/", SESSIONS_DIR, show_index=False)
         runner = web.AppRunner(app, access_log=None)  # keep milltender.log readable
         await runner.setup()
@@ -560,7 +595,15 @@ class Daemon:
             "recovery_s_left": (max(0, round(self.recovery_until - now))
                                 if self.recovery_until else None),
             "max_mph": MAX_MPH,
+            "chime_local": self.chime_local,
         })
+
+    async def h_chime(self, req: web.Request) -> web.Response:
+        body = await req.json()
+        self.chime_local = bool(body.get("on", not self.chime_local))
+        if self.chime_local and body.get("test"):
+            self.chime("change")
+        return web.json_response({"chime_local": self.chime_local})
 
     async def h_history(self, _req: web.Request) -> web.Response:
         samples = self.samples
@@ -841,10 +884,12 @@ class Daemon:
             for i, seg in enumerate(segments):
                 kind = seg.get("type", "hold")
                 log.info("program '%s': segment %d/%d — %s", name, i + 1, len(segments), seg)
+                nxt = segments[i + 1] if i + 1 < len(segments) else None
+                self._prog_cue_to = entry_mph(nxt) if nxt else 0.0  # 0: the closing stop
                 if kind in runners:
                     ok = await runners[kind](name, i, len(segments), seg)
                 else:
-                    self._prog_speed = clamp_mph(seg["mph"])
+                    self._set_prog_speed(clamp_mph(seg["mph"]))
                     await self.send_cmd(bytes([0x53, 0x02, round(self._prog_speed * 10), 0x00]))
                     ok = await self._run_hold(name, i, len(segments), seg["minutes"] * 60,
                                               f"{self._prog_speed} mph")
@@ -852,6 +897,7 @@ class Daemon:
                     log.info("program '%s': session ended — aborting", name)
                     return
             log.info("program '%s' complete — stopping and uploading", name)
+            self.chime("change")
             await self.send_cmd(bytes([0x53, 0x03]))
             if not (self.stop_task and not self.stop_task.done()):
                 self.stop_task = asyncio.get_running_loop().create_task(self._stop_flow())
@@ -871,11 +917,42 @@ class Daemon:
             return "tick"
         return "hold"  # paused/stopped: freeze the program clock
 
+    def chime(self, kind: str) -> None:
+        """Sound a tone on the daemon host, without making the caller wait for it."""
+        if not self.chime_local:
+            return
+
+        async def play() -> None:
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "afplay", str(chime_wav(kind)),
+                    stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+                await proc.wait()
+            except Exception as exc:  # noqa: BLE001
+                log.debug("chime %s failed: %s", kind, exc)
+
+        self._chime_task = asyncio.get_running_loop().create_task(play())
+
+    def _set_prog_speed(self, mph: float) -> None:
+        """Jump to a speed, sounding the tone the countdown just promised. Ramps and
+        HR-following assign _prog_speed directly: they drift, they don't jump."""
+        if abs(mph - self._prog_speed) >= 0.05:
+            self.chime("change")
+        self._prog_speed = mph
+
     def _prog_report(self, name: str, i: int, total: int, left_s: float,
                      label: str = "") -> None:
         self.program_status = {"name": name, "seg": i + 1, "total": total,
                                "mph": self._prog_speed, "seg_left_s": round(left_s),
                                "label": label or f"{self._prog_speed} mph"}
+        to = self._prog_cue_to
+        if to is None or abs(to - self._prog_speed) < 0.05 or not 0 < left_s <= CUE_LEAD_S:
+            return
+        count = math.ceil(left_s)
+        self.program_status["cue"] = {"in_s": count, "to_mph": to}
+        if self._chimed != (i, count):
+            self._chimed = (i, count)
+            self.chime("count")
 
     async def _run_hold(self, name: str, i: int, total: int, seconds: float,
                         label: str = "") -> bool:
@@ -917,7 +994,7 @@ class Daemon:
 
     async def _run_goal(self, name: str, i: int, total: int, seg: dict) -> bool:
         """Fixed speed until the session total reaches a step or distance goal."""
-        self._prog_speed = clamp_mph(seg["mph"])
+        self._set_prog_speed(clamp_mph(seg["mph"]))
         await self.send_cmd(bytes([0x53, 0x02, round(self._prog_speed * 10), 0x00]))
         while True:
             cur_steps = self.samples[-1].steps if self.samples else 0
