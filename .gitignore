@@ -11,3 +11,5 @@ programs.json
 phase0/rescue-*.json
 .DS_Store
 assets/strava-app-icon.png
+
+/venv

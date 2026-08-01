@@ -24,7 +24,7 @@ import time
 import wave
 from pathlib import Path
 
-from aiohttp import web
+from aiohttp import WSMsgType, web
 from bleak import BleakClient, BleakScanner
 from dotenv import load_dotenv
 
@@ -238,6 +238,7 @@ class Daemon:
         self.in_session = False
         self.hrm_task: asyncio.Task | None = None
         self.client: BleakClient | None = None
+        self.relay_ws: web.WebSocketResponse | None = None  # browser Web Bluetooth relay
         self.latest: dict = {}  # live state for the web UI
         self.pending_end_t: float | None = None  # belt stopped; grace timer running
         self.user_paused = False  # explicit UI pause: hold session open, no grace timer
@@ -293,6 +294,9 @@ class Daemon:
         self.rebuild_hr_baseline()
         await self.start_web()
         while True:
+            if self.relay_ws is not None:  # a browser owns the treadmill's single BLE slot
+                await asyncio.sleep(1)
+                continue
             try:
                 address = await self.find_treadmill()
                 await self.poll_treadmill(address)
@@ -329,7 +333,7 @@ class Daemon:
             self.client = client
             try:
                 await client.start_notify(NOTIFY_CHAR, self.on_treadmill_frame)
-                while client.is_connected:
+                while client.is_connected and self.relay_ws is None:  # yield the slot to a relay
                     await client.write_gatt_char(WRITE_CHAR, frame(bytes([0x51])), response=False)
                     if (self.pending_end_t and not self.user_paused
                             and time.time() - self.pending_end_t > GRACE_S):
@@ -598,6 +602,7 @@ class Daemon:
     async def start_web(self) -> None:
         app = web.Application()
         app.router.add_get("/", self.h_index)
+        app.router.add_get("/api/relay", self.h_relay)
         app.router.add_get("/api/status", self.h_status)
         app.router.add_get("/api/history", self.h_history)
         app.router.add_post("/api/speed", self.h_speed)
@@ -626,6 +631,55 @@ class Daemon:
     async def h_index(self, _req: web.Request) -> web.FileResponse:
         return web.FileResponse(Path(__file__).resolve().parent / "web" / "index.html")
 
+    async def h_relay(self, req: web.Request) -> web.WebSocketResponse:
+        """A browser bridges the treadmill's BLE over this socket: command frames go
+        down as binary, the treadmill's notifications come back up. The daemon keeps
+        all its logic — the browser is just the radio."""
+        ws = web.WebSocketResponse()
+        await ws.prepare(req)
+        if self.relay_ws is not None:
+            await ws.close(message=b"a relay is already connected")
+            return ws
+        self.relay_ws = ws
+        self.latest.pop("state", None)
+        log.info("browser BLE relay connected")
+        poller = asyncio.get_running_loop().create_task(self._relay_poll())
+        try:
+            async for msg in ws:
+                if msg.type == WSMsgType.BINARY:
+                    self._relay_ingest(msg.data)
+        finally:
+            poller.cancel()
+            self.relay_ws = None
+            self.latest.pop("state", None)
+            log.info("browser BLE relay disconnected")
+        return ws
+
+    def _relay_ingest(self, data: bytes) -> None:
+        """A tagged frame from the browser bridge: byte 0 selects the device it came
+        from, the rest is that device's raw notification."""
+        if not data:
+            return
+        chan, payload = data[0], data[1:]
+        if chan == 0x00:
+            self.on_treadmill_frame(None, payload)
+        elif chan == 0x01:
+            self.on_hr(None, payload)
+
+    async def _relay_poll(self) -> None:
+        """Drive the same 1 Hz status poll and grace timer the local loop runs, but
+        over the relay transport."""
+        try:
+            while self.relay_ws is not None:
+                await self._send_frame(frame(bytes([0x51])))
+                if (self.pending_end_t and not self.user_paused
+                        and time.time() - self.pending_end_t > GRACE_S):
+                    await self.finalize()
+                    await self.reset_base()
+                await asyncio.sleep(1.0)
+        except asyncio.CancelledError:
+            pass
+
     def _moving_s(self, now: float) -> int | None:
         """Live moving time: moving_seconds over the session so far, plus the tail
         from the last sample to now so the tile ticks in real time while walking."""
@@ -641,7 +695,8 @@ class Daemon:
         now = time.time()
         return web.json_response({
             **self.latest,
-            "connected": self.client is not None,
+            "connected": self.client is not None or self.relay_ws is not None,
+            "relay": self.relay_ws is not None,
             "in_session": self.in_session,
             "moving_s": self._moving_s(now) if self.in_session else None,
             "hr": self.latest_hr if now - self.hr_last_seen < 10 else None,
@@ -674,10 +729,19 @@ class Daemon:
                   for s, c in zip(samples[::step], cads[::step])]
         return web.json_response({"t0": t0, "points": points})
 
-    async def send_cmd(self, payload: bytes) -> None:
-        if self.client is None or not self.client.is_connected:
+    async def _send_frame(self, framed: bytes) -> None:
+        """Write a framed command to the treadmill via whichever transport owns it:
+        a browser Web Bluetooth relay if one is attached, else the local BLE link."""
+        ws = self.relay_ws
+        if ws is not None and not ws.closed:
+            await ws.send_bytes(framed)
+        elif self.client is not None and self.client.is_connected:
+            await self.client.write_gatt_char(WRITE_CHAR, framed, response=False)
+        else:
             raise web.HTTPConflict(text="treadmill not connected")
-        await self.client.write_gatt_char(WRITE_CHAR, frame(payload), response=False)
+
+    async def send_cmd(self, payload: bytes) -> None:
+        await self._send_frame(frame(payload))
 
     async def h_speed(self, req: web.Request) -> web.Response:
         mph = float((await req.json())["mph"])
@@ -1177,8 +1241,9 @@ class Daemon:
     # ---------- heart rate strap ----------
 
     async def hrm_loop(self) -> None:
-        """Maintain a strap connection while a session is active."""
-        while self.in_session:
+        """Maintain a strap connection while a session is active — unless a browser
+        relay is bridging the strap for us, in which case HR arrives over the socket."""
+        while self.in_session and self.relay_ws is None:
             try:
                 device = await self.find_hrm()
                 if device is None:
@@ -1187,7 +1252,7 @@ class Daemon:
                 async with BleakClient(device, timeout=15.0) as client:
                     log.info("HR strap connected: %s", device)
                     await client.start_notify(HR_MEASUREMENT, self.on_hr)
-                    while client.is_connected and self.in_session:
+                    while client.is_connected and self.in_session and self.relay_ws is None:
                         await asyncio.sleep(1.0)
             except Exception as exc:  # noqa: BLE001
                 log.warning("HR strap connection failed: %s (retrying)", exc)
