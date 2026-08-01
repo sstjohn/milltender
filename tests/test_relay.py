@@ -59,7 +59,7 @@ def test_relay_ingest_routes_treadmill_and_hr_channels(daemon, monkeypatch):
     monkeypatch.setattr(daemon, "on_hr", lambda c, d: hr.append(bytes(d)))
     daemon._relay_ingest(b"\x00\x02\x51\x03")  # channel 0: treadmill notification
     daemon._relay_ingest(b"\x01\x10\x48")      # channel 1: HR measurement
-    daemon._relay_ingest(b"")                   # empty frame is ignored
+    daemon._relay_ingest(b"")
     assert tm == [b"\x02\x51\x03"] and hr == [b"\x10\x48"]
 
 

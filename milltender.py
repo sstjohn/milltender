@@ -238,7 +238,7 @@ class Daemon:
         self.in_session = False
         self.hrm_task: asyncio.Task | None = None
         self.client: BleakClient | None = None
-        self.relay_ws: web.WebSocketResponse | None = None  # browser Web Bluetooth relay
+        self.relay_ws: web.WebSocketResponse | None = None
         self.latest: dict = {}  # live state for the web UI
         self.pending_end_t: float | None = None  # belt stopped; grace timer running
         self.user_paused = False  # explicit UI pause: hold session open, no grace timer
@@ -295,8 +295,8 @@ class Daemon:
         await self.start_web()
         while True:
             # disconnect mid-walk: finalize with what we have. Runs above the relay
-            # branch too, so a stranded relay (tab open, its BLE dead) can't hang a
-            # session open forever the way the local path never could.
+            # branch too, so a stranded relay (tab open, its BLE dead) can't hang the
+            # session open forever.
             if self.in_session and time.time() - self.last_sample_t > 90:
                 log.warning("no data for 90s during session; finalizing with what we have")
                 await self.finalize()
@@ -632,8 +632,7 @@ class Daemon:
 
     async def h_relay(self, req: web.Request) -> web.WebSocketResponse:
         """A browser bridges the treadmill's BLE over this socket: command frames go
-        down as binary, the treadmill's notifications come back up. The daemon keeps
-        all its logic — the browser is just the radio."""
+        down as binary, the treadmill's notifications come back up."""
         ws = web.WebSocketResponse()
         await ws.prepare(req)
         if self.relay_ws is not None:
