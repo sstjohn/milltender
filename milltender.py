@@ -50,8 +50,8 @@ MAX_MPH = float(os.environ.get("MAX_MPH", "6.0"))  # hard ceiling on daemon-comm
 WEB_PORT = int(os.environ.get("WEB_PORT", "8321"))
 GRACE_S = int(os.environ.get("GRACE_S", "180"))  # resume window after belt stop
 RECOVERY_S = int(os.environ.get("RECOVERY_S", "60"))  # HR capture after deliberate stop
-MIN_SESSION_S = 60
-MIN_SESSION_STEPS = 20
+MIN_SESSION_S = int(os.environ.get("MIN_SESSION_S", "60"))  # discard shorter walks; 0 keeps all
+MIN_SESSION_STEPS = int(os.environ.get("MIN_SESSION_STEPS", "50"))  # ...or fewer steps
 CUE_LEAD_S = 3  # countdown before a programmed speed change: beep beep beep beeeep
 CHIME_LOCAL = os.environ.get("CHIME", "1") != "0"  # tones from the daemon host's speakers
 SESSIONS_DIR = Path(__file__).resolve().parent / "sessions"
