@@ -581,13 +581,25 @@ function bridgeSocket() {
   bridgeWs.binaryType = "arraybuffer";
   bridgeWs.onclose = () => { bridgeWs = null; };
   bridgeWs.onmessage = async e => {           // server -> treadmill (poll/command frames)
-    try { await bridgeWrite.writeValueWithoutResponse(new Uint8Array(e.data)); } catch {}
+    try { await bridgeWrite.writeValueWithoutResponse(new Uint8Array(e.data)); }
+    catch (err) { bridgeDown(err.message); }  // a lost write means the belt didn't hear it
   };
+}
+
+// If the browser-side GATT link dies, the socket can stay open and the daemon would
+// keep believing the frames it sends reach the belt — a Stop could vanish silently.
+// Dropping the relay instead makes the daemon revert to its own BLE, or honestly
+// report the treadmill unreachable, rather than trusting a command that never landed.
+function bridgeDown(why) {
+  if (why) console.warn("bridge down:", why);
+  bridgeWrite = null;
+  if (bridgeWs) bridgeWs.close();
 }
 
 async function bridgeTreadmill() {
   const dev = await navigator.bluetooth.requestDevice({
     filters: [{ namePrefix: "FS-" }], optionalServices: [FFF0] });
+  dev.addEventListener("gattserverdisconnected", () => bridgeDown("treadmill GATT lost"));
   const svc = await (await dev.gatt.connect()).getPrimaryService(FFF0);
   bridgeWrite = await svc.getCharacteristic(WRITE);
   const notify = await svc.getCharacteristic(NOTIFY);
