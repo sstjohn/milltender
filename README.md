@@ -99,15 +99,31 @@ copy it to `~/Library/LaunchAgents/`, and
 `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/lol.ssj.milltender.plist`.
 On Linux, an equivalent systemd user service is a few lines.
 
+### When the daemon can't reach the treadmill directly
+
+The daemon usually talks to the belt over its own Bluetooth, but it doesn't have
+to be in range. Open the dashboard in a browser *beside* the treadmill and tap
+the treadmill pill in the header: that tab bridges the belt's Bluetooth to the
+daemon over a WebSocket, so the daemon can live on a machine that's nowhere near
+it. Tap the strap pill to bridge a heart-rate device the same way. The daemon
+keeps all of its logic either way — the browser is only the radio.
+
+This uses Web Bluetooth, which browsers expose only in a secure context: reach
+the dashboard over `localhost` (an SSH port-forward does the trick) or HTTPS,
+in Chrome or Edge. Firefox and Safari don't implement it.
+
 ## The dashboard
 
-Four tabs: **Live** (speed/HR/HRV charts, stat tiles, belt controls with
-pause, stop, and a speed stepper), **Trends** (your personal heart-rate-by-speed
-curve — all-time vs. a selectable recent window — weekly volume, per-session
-recovery and readiness numbers), **History** (every session, reviewable and
-replayable, FIT downloads), and **Programs** (interval workouts from four
-building blocks: timed holds, speed ramps, heart-rate holds, and step/distance
-goals; any past session can be replayed as a program).
+Four tabs: **Live** (speed/HR/HRV charts, stat tiles — time counts moving
+minutes, so pauses don't inflate it — and belt controls with pause, stop, and a
+speed stepper), **Trends** (your personal heart-rate-by-speed curve — all-time
+vs. a selectable recent window — weekly volume, per-session recovery and
+readiness numbers), **History** (every session, reviewable and replayable, with
+FIT download and import of a `.fit` or sidecar recorded elsewhere), and
+**Programs** (interval workouts from four building blocks: timed holds, speed
+ramps, heart-rate holds, and step/distance goals; any past session can be
+replayed as a program). A countdown — three short beeps and a long one, plus a
+full-screen overlay — leads every programmed speed change.
 
 Reviewing a session shows a few things the upload platforms don't, computed
 from the per-second data kept locally: **heart-rate recovery** after the belt
@@ -128,6 +144,8 @@ where the signal isn't there, rather than reporting noise.
 | `MAX_MPH` | `6.0` | hard ceiling on every speed the daemon commands |
 | `GRACE_S` | `180` | resume window after the belt stops before uploading |
 | `RECOVERY_S` | `60` | recovery-HR capture after a deliberate stop |
+| `MIN_SESSION_S` | `60` | drop walks shorter than this many seconds; `0` keeps every one |
+| `MIN_SESSION_STEPS` | `50` | ...or with fewer steps than this |
 
 The default `TREADMILL_ADDRESS` won't match your unit; discovery falls back to
 scanning for the `FS-` name prefix and finds it automatically — set the address
