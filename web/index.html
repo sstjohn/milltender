@@ -225,7 +225,7 @@
     <button class="pill" id="chimeMac" aria-pressed="true"
             title="Countdown beeps from the Mac running milltender">♪ mac</button>
     <button class="pill" id="strapPill"><span id="hrDot" class="dot" aria-hidden="true"></span>strap</button>
-    <button class="pill" id="tmPill"><span id="tmDot" class="dot" aria-hidden="true"></span><span id="stateTxt">–</span></button>
+    <button class="pill" id="tmPill"><span id="tmDot" class="dot" aria-hidden="true"></span><span id="stateTxt">–</span><span id="relayMark" aria-hidden="true"></span></button>
   </div>
 </header>
 
@@ -419,10 +419,13 @@ function render() {
   const running = status.state === 3;
   const paused = status.state === 10 || status.user_paused;
   $("tmDot").className = "dot" + (status.connected ? " on" : "");
-  $("stateTxt").textContent = (!status.connected ? "asleep" :
-    running ? "running" : paused ? "paused" : "idle") + (status.relay ? " ⎔" : "");
-  $("tmPill").setAttribute("aria-label", "treadmill " + $("stateTxt").textContent +
-    (bridgeReady ? " — tap to bridge over Bluetooth" : ""));
+  const stateWord = !status.connected ? "asleep" :
+    running ? "running" : paused ? "paused" : "idle";
+  $("stateTxt").textContent = stateWord;
+  $("relayMark").textContent = status.relay ? " ⎔" : "";
+  $("tmPill").setAttribute("aria-label", "treadmill " + stateWord +
+    (status.relay ? ", bridged over Bluetooth"
+      : bridgeReady ? " — tap to bridge over Bluetooth" : ""));
   $("hrDot").className = "dot" + (status.hr_connected ? " on" : "");
   $("strapPill").setAttribute("aria-label",
     "heart-rate strap " + (status.hr_connected ? "connected" : "not connected"));
@@ -557,9 +560,9 @@ $("chimeMac").onclick = async (e) => {
   e.currentTarget.setAttribute("aria-pressed", String(on));
 };
 
-// ---- Bluetooth bridge: this tab can be the treadmill's radio when the server can't
-// reach it directly. Web Bluetooth here, piped to the daemon over one socket; each
-// notification tagged with its source (0 treadmill, 1 heart rate). ----
+// Bluetooth bridge: this tab is the treadmill's radio when the server can't reach
+// it directly. Web Bluetooth here, piped to the daemon over one socket; each
+// notification tagged with its source (0 treadmill, 1 heart rate).
 const bridgeReady = !!navigator.bluetooth;
 const FFF0 = 0xfff0, WRITE = 0x0000fff2, NOTIFY = 0x0000fff1;
 let bridgeWs = null, bridgeWrite = null;
@@ -606,6 +609,11 @@ if (bridgeReady) {
   $("strapPill").onclick = () => bridgeWrite
     ? bridgeHr().catch(e => alert("Bluetooth: " + e.message))
     : alert("Bridge the treadmill first, then add the strap.");
+} else {
+  for (const id of ["tmPill", "strapPill"]) {  // status-only chips without Web Bluetooth
+    $(id).setAttribute("aria-disabled", "true");
+    $(id).tabIndex = -1;
+  }
 }
 
 async function pollStatus() {
