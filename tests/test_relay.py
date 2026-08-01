@@ -63,6 +63,13 @@ def test_relay_ingest_routes_treadmill_and_hr_channels(daemon, monkeypatch):
     assert tm == [b"\x02\x51\x03"] and hr == [b"\x10\x48"]
 
 
+def test_truncated_hr_frame_does_not_propagate(daemon):
+    # a bare channel tag with no HR payload must be swallowed, not raise out of the
+    # socket loop and strand the bridge
+    daemon._relay_ingest(b"\x01")  # channel 1, empty payload -> on_hr(None, b"")
+    assert daemon.latest_hr is None
+
+
 def test_hr_measurement_from_relay_updates_bpm_and_rr(daemon):
     # standard 0x2A37: flags=0x10 (RR present, 8-bit bpm), bpm=72, one RR = 1024/1024 s
     daemon.on_hr(None, bytes([0x10, 72, 0x00, 0x04]))

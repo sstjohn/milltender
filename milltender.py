@@ -294,6 +294,12 @@ class Daemon:
         self.rebuild_hr_baseline()
         await self.start_web()
         while True:
+            # disconnect mid-walk: finalize with what we have. Runs above the relay
+            # branch too, so a stranded relay (tab open, its BLE dead) can't hang a
+            # session open forever the way the local path never could.
+            if self.in_session and time.time() - self.last_sample_t > 90:
+                log.warning("no data for 90s during session; finalizing with what we have")
+                await self.finalize()
             if self.relay_ws is not None:  # a browser owns the treadmill's single BLE slot
                 await asyncio.sleep(1)
                 continue
@@ -305,11 +311,6 @@ class Daemon:
                 if self._fail_count == 1 or self._fail_count % 100 == 0:
                     log.warning("treadmill unreachable (asleep is normal when idle): %s "
                                 "(attempt %d; retrying quietly)", exc, self._fail_count)
-            if self.in_session:
-                # disconnect mid-walk: give it one quick retry cycle before finalizing
-                if time.time() - self.last_sample_t > 90:
-                    log.warning("no data for 90s during session; finalizing with what we have")
-                    await self.finalize()
             await asyncio.sleep(5 if self.in_session else 15)
 
     async def find_treadmill(self) -> str:
@@ -522,11 +523,9 @@ class Daemon:
         """BLE stop clears the base's session state (unlike the remote's stop,
         which only pauses) — prevents stale counters on the next start."""
         try:
-            if self.client and self.client.is_connected:
-                await self.client.write_gatt_char(WRITE_CHAR, frame(bytes([0x53, 0x03])),
-                                                  response=False)
-                log.info("base session reset")
-        except Exception as exc:  # noqa: BLE001
+            await self._send_frame(frame(bytes([0x53, 0x03])))  # relay or local, whichever owns it
+            log.info("base session reset")
+        except Exception as exc:  # noqa: BLE001 — includes "no transport": nothing to reset
             log.warning("base reset failed: %s", exc)
 
     async def finalize(self) -> None:
@@ -661,21 +660,27 @@ class Daemon:
         if not data:
             return
         chan, payload = data[0], data[1:]
-        if chan == 0x00:
-            self.on_treadmill_frame(None, payload)
-        elif chan == 0x01:
-            self.on_hr(None, payload)
+        try:
+            if chan == 0x00:
+                self.on_treadmill_frame(None, payload)
+            elif chan == 0x01:
+                self.on_hr(None, payload)
+        except Exception as exc:  # noqa: BLE001 — a truncated frame shouldn't drop the bridge
+            log.warning("relay frame dropped (chan %d): %s", chan, exc)
 
     async def _relay_poll(self) -> None:
         """Drive the same 1 Hz status poll and grace timer the local loop runs, but
         over the relay transport."""
         try:
             while self.relay_ws is not None:
-                await self._send_frame(frame(bytes([0x51])))
-                if (self.pending_end_t and not self.user_paused
-                        and time.time() - self.pending_end_t > GRACE_S):
-                    await self.finalize()
-                    await self.reset_base()
+                try:
+                    await self._send_frame(frame(bytes([0x51])))
+                    if (self.pending_end_t and not self.user_paused
+                            and time.time() - self.pending_end_t > GRACE_S):
+                        await self.finalize()
+                        await self.reset_base()
+                except Exception as exc:  # noqa: BLE001 — one bad poll shouldn't kill the poller
+                    log.warning("relay poll error: %s (continuing)", exc)
                 await asyncio.sleep(1.0)
         except asyncio.CancelledError:
             pass
