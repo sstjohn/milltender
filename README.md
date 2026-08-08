@@ -114,16 +114,30 @@ in Chrome or Edge. Firefox and Safari don't implement it.
 
 ## The dashboard
 
-Four tabs: **Live** (speed/HR/HRV charts, stat tiles — time counts moving
+Five tabs: **Live** (speed/HR/HRV charts, stat tiles — time counts moving
 minutes, so pauses don't inflate it — and belt controls with pause, stop, and a
 speed stepper), **Trends** (your personal heart-rate-by-speed curve — all-time
 vs. a selectable recent window — weekly volume, per-session recovery and
 readiness numbers), **History** (every session, reviewable and replayable, with
-FIT download and import of a `.fit` or sidecar recorded elsewhere), and
-**Programs** (interval workouts from four building blocks: timed holds, speed
-ramps, heart-rate holds, and step/distance goals; any past session can be
-replayed as a program). A countdown — three short beeps and a long one, plus a
-full-screen overlay — leads every programmed speed change.
+FIT download and import of a `.fit` or sidecar recorded elsewhere), **Programs**
+(interval workouts from four building blocks: timed holds, speed ramps,
+heart-rate holds, and step/distance goals; any past session can be replayed as a
+program), and **Plan** (a multi-week block built from those programs). A
+countdown — three short beeps and a long one, plus a full-screen overlay — leads
+every programmed speed change.
+
+A plan saves you picking the right program every day: build weeks in the Plan
+tab, and the Live tab opens with today's session and a button to start it. Which
+week you're in comes from the calendar, so a session you skip is simply not done
+— nothing carries over and nothing is owed. Completion is read back out of
+`sessions/`, never recorded separately, so a walk counts because it happened.
+
+The one number a plan tracks is minutes spent at running speed per week, against
+what the weeks you built call for — it's the quantity that gets people hurt when
+it climbs too fast, and it's measured from recorded speed rather than from what
+you meant to do. Milltender will say so when an impact session falls inside
+`IMPACT_GAP_H` of the last one; in the unpinned scheduling mode it offers a
+walking session first instead. It never refuses to start anything.
 
 Reviewing a session shows a few things the upload platforms don't, computed
 from the per-second data kept locally: **heart-rate recovery** after the belt
@@ -146,6 +160,7 @@ where the signal isn't there, rather than reporting noise.
 | `RECOVERY_S` | `60` | recovery-HR capture after a deliberate stop |
 | `MIN_SESSION_S` | `60` | drop walks shorter than this many seconds; `0` keeps every one |
 | `MIN_SESSION_STEPS` | `50` | ...or with fewer steps than this |
+| `IMPACT_MPH` | `4.4` | at or above this counts as running, not walking |
 
 The default `TREADMILL_ADDRESS` won't match your unit; discovery falls back to
 scanning for the `FS-` name prefix and finds it automatically — set the address
@@ -153,6 +168,11 @@ only to pin a specific device.
 
 `MAX_MPH` binds manual controls, programs, ramps, and HR-holds alike. It
 cannot restrain the handheld remote, which talks to the base on its own radio.
+
+`IMPACT_MPH` is the line between walking and running for *your* legs, and the
+default suits a ladder whose fast walks top out around 4 mph. Set it above your
+briskest walk and below your easiest jog, or the plan's weekly running minutes
+will count the wrong seconds.
 
 ## Safety
 
@@ -164,8 +184,29 @@ with the respect you'd give the physical controls, and keep the remote nearby.
 
 Each session becomes a FIT file plus a JSON sidecar in `sessions/` — yours,
 locally, forever, regardless of what the upload platforms do. The sidecars
-power the trends and history views. Nothing leaves your machine except the
-uploads you configured.
+power the trends, history, and plan views. Nothing leaves your machine except
+the uploads you configured.
+
+Your programs and your plan live beside them in `programs.json` and `plan.json`,
+both untracked by git. The Plan tab writes `plan.json` for you, but it's plain
+enough to edit by hand:
+
+```json
+{
+ "name": "walk to jog",
+ "start": "2026-08-10",
+ "mode": "days",
+ "weeks": [
+  {"mon": "walk-jog 8x1", "wed": "tempo walk 3x6", "sat": "easy 45 base"}
+ ]
+}
+```
+
+Values are program names, so editing a program updates every week that uses it,
+and a weekday you leave out is a rest day. `start` snaps back to its Monday.
+Under `"mode": "open"` a week is a plain list instead — `["walk-jog 8x1",
+"easy 30"]` — for training on whatever days you get, in which case milltender
+offers you the next session you haven't done rather than one tied to today.
 
 ## Tests
 
