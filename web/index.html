@@ -172,6 +172,8 @@
     padding: 9px 0; border-top: 1px solid var(--border); font-size: 13px;
   }
   .list .row:first-child { border-top: none; }
+  .list .row[aria-current] { padding-left: 8px; font-weight: 600;
+                             box-shadow: inset 2px 0 var(--speed); }
   .row .meta { flex: 1; min-width: 0; }
   .row .meta .sub2 { color: var(--muted); font-size: 11.5px; margin-top: 1px; }
   .btn-sm {
@@ -181,18 +183,22 @@
   }
   .linky { border: none; background: none; color: var(--speed); font: inherit;
            font-size: 12.5px; cursor: pointer; }
-  #progEditor { margin-top: 6px; font-size: 13px; color: var(--ink-2); }
-  #progEditor summary { cursor: pointer; padding: 4px 0; }
-  #progEditor input, #progEditor select {
+  #progEditor, #planEditor { margin-top: 6px; font-size: 13px; color: var(--ink-2); }
+  #progEditor summary, #planEditor summary { cursor: pointer; padding: 4px 0; }
+  #progEditor input, #progEditor select, #planEditor input, #planEditor select {
     font: inherit; font-size: 13px; color: var(--ink-1);
     background: var(--page); border: 1px solid var(--border);
     border-radius: 8px; padding: 6px 8px; width: 60px;
   }
-  #progEditor select { width: auto; }
-  #progEditor input#pName { width: 100%; margin: 6px 0; }
+  #progEditor select, #planEditor select, #planEditor input[type=date] {
+    width: auto; max-width: 100%;
+  }
+  #progEditor input#pName, #planEditor input#plEdName { width: 100%; margin: 6px 0; }
   .prow { display: flex; align-items: center; gap: 5px; margin: 5px 0; flex-wrap: wrap; }
   .prow span { display: inline-flex; align-items: center; gap: 5px; }
   .prow span[hidden] { display: none !important; }
+  .prow .day { min-width: 36px; }
+  .jogmin { color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
   .rowbtns { display: flex; gap: 8px; margin-top: 8px; }
   .empty { color: var(--muted); font-size: 12.5px; padding: 6px 0; }
   .rlabel { display: flex; align-items: center; gap: 6px; font-size: 12px;
@@ -234,6 +240,7 @@
   <button data-tab="trends" role="tab" aria-selected="false" aria-controls="panel-trends">Trends</button>
   <button data-tab="history" role="tab" aria-selected="false" aria-controls="panel-history">History</button>
   <button data-tab="programs" role="tab" aria-selected="false" aria-controls="panel-programs">Programs</button>
+  <button data-tab="plan" role="tab" aria-selected="false" aria-controls="panel-plan">Plan</button>
 </nav>
 
 <div id="grace" class="banner">⏸ Belt stopped — uploading in <b id="graceT">–</b> unless you resume</div>
@@ -248,6 +255,20 @@
 <p id="cueSr" class="visually-hidden" role="status" aria-live="assertive"></p>
 
 <section data-tab="live" role="tabpanel" id="panel-live" aria-label="Live">
+<div class="card panel" id="planCard" style="margin: 0 0 10px" hidden>
+  <div class="panel-head"><h2>Today</h2><span class="from" id="pcWeek"></span></div>
+  <div class="list">
+    <div class="row">
+      <div class="meta">
+        <div id="pcProgram">–</div>
+        <div class="sub2" id="pcSub"></div>
+        <div class="sub2" id="pcWarn" style="color: var(--warning)" hidden></div>
+      </div>
+      <button class="btn-sm" id="pcStart" hidden>▸ Start</button>
+    </div>
+  </div>
+</div>
+
 <div class="grid">
   <div class="card hero" style="--accent: var(--speed)">
     <div class="label">Speed</div>
@@ -401,13 +422,61 @@
 </div>
 </section>
 
+<section data-tab="plan" role="tabpanel" id="panel-plan" aria-label="Training plan" hidden>
+<div id="planHas" hidden>
+  <div class="minis" style="margin-top:0">
+    <div class="card mini"><div class="label">Jog min</div>
+      <div class="value" id="plJog">–<span class="unit" id="plJogPlan"></span></div></div>
+    <div class="card mini"><div class="label">Since jog</div>
+      <div class="value" id="plSince">–<span class="unit"> h</span></div></div>
+    <div class="card mini"><div class="label">On feet</div>
+      <div class="value" id="plFeet">–<span class="unit"> h</span></div></div>
+  </div>
+  <div class="card panel">
+    <div class="panel-head">
+      <span class="swatch" style="background: var(--hr)"></span><h2>Jog minutes per week</h2>
+      <span class="legend"><i style="background:var(--muted)"></i>plan</span>
+    </div>
+    <canvas id="cJog"></canvas>
+  </div>
+</div>
+<div class="card panel">
+  <div class="panel-head"><h2 id="plName">Plan</h2>
+    <span class="from" id="plSpm"></span>
+    <span class="now" id="plWeekN"></span></div>
+  <div class="empty" id="plWarn" style="color: var(--warning)" hidden></div>
+  <div id="plWeek" class="list"><div class="empty">no plan yet — build one below</div></div>
+  <div class="rowbtns" id="plShift" hidden>
+    <button class="btn-sm" id="plRepeat">repeat this week</button>
+    <button class="btn-sm" id="plSkip">skip ahead a week</button>
+  </div>
+  <details id="planEditor"><summary>Plan editor</summary>
+    <input id="plEdName" placeholder="plan name" aria-label="Plan name">
+    <div class="prow">
+      <label for="plEdStart">starts</label><input id="plEdStart" type="date">
+      <label for="plEdMode">mode</label>
+      <select id="plEdMode">
+        <option value="days">by weekday</option>
+        <option value="open">open week</option>
+      </select>
+    </div>
+    <div id="plEdWeeks"></div>
+    <div class="rowbtns">
+      <button class="btn-sm" id="plEdAdd">+ add week</button>
+      <button class="btn-sm" id="plEdSave"><b>Save</b></button>
+      <button class="btn-sm" id="plEdDel">Remove plan</button>
+    </div>
+  </details>
+</div>
+</section>
+
 <div class="tip" id="tip"></div>
 <footer id="foot">milltender</footer>
 
 <script>
 const $ = id => document.getElementById(id);
 const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-let status = {}, history = { points: [] };
+let status = {}, history = { points: [] }, programs = {};
 
 const fmtTime = s => {
   if (s == null) return "–";
@@ -484,6 +553,7 @@ function render() {
   $("pause").disabled = !status.connected || !running;
   $("stop").disabled = !status.connected || (!running && !paused && g == null);
   $("stop").textContent = g != null ? "■ Upload now" : "■ Stop";
+  $("planCard").hidden = !planReady || !!status.program;
   $("minus").disabled = $("plus").disabled = !running;
   for (const b of $("presets").children) {
     b.disabled = !running || parseFloat(b.dataset.mph) > (status.max_mph || 6);
@@ -735,7 +805,7 @@ function draw(canvas, series, color, fmt, o = {}) {
   return { x, y, pts, xfmt: o.xfmt };
 }
 
-let geo = { speed: null, hr: null, hrv: null, curve: null, weekly: null,
+let geo = { speed: null, hr: null, hrv: null, curve: null, weekly: null, jog: null,
             rspeed: null, rhr: null, rhrv: null, rrec: null };
 let reviewPts = null;   // past-session samples shown in the History review panel
 let reviewMeta = null;  // that session's metadata (recovery, etc.)
@@ -1056,14 +1126,15 @@ $("pSave").onclick = async () => {
   loadPrograms();
 };
 async function loadPrograms() {
-  let progs = {};
-  try { progs = await (await fetch("/api/programs")).json(); } catch {}
+  try { programs = await (await fetch("/api/programs")).json(); } catch {}
+  for (const sel of $("plEdWeeks").querySelectorAll("select")) planEdOptions(sel);
+  planEdTotals();
   const el = $("progList");
-  const names = Object.keys(progs);
+  const names = Object.keys(programs);
   if (!names.length) { el.innerHTML = '<div class="empty">none saved</div>'; return; }
   el.innerHTML = "";
   for (const name of names) {
-    const segs = progs[name];
+    const segs = programs[name];
     const est = estimate(segs);
     const row = document.createElement("div");
     row.className = "row";
@@ -1087,6 +1158,239 @@ async function loadPrograms() {
     el.appendChild(row);
   }
 }
+// ---- training plan ----
+let plan = {}, planReady = false;
+const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+const cap = s => s ? s[0].toUpperCase() + s.slice(1) : "";
+const round1 = v => Math.round(v * 10) / 10;
+// The editor's ramp has to be the arithmetic the tracker scores you against, so this
+// follows the daemon's IMPACT_MPH — its own value when it reports one, else the default.
+const jogMin = name => (programs[name] || []).reduce((t, s) =>
+  t + ((s.type ?? "hold") === "hold" && s.mph >= (plan.impact_mph ?? 4.4) ? s.minutes || 0 : 0), 0);
+
+async function loadPlan() {
+  try {
+    const r = await fetch("/api/plan");
+    plan = (r.ok && await r.json()) || {};
+  } catch { plan = {}; }
+  planReady = !!plan.name;
+  renderPlan();
+  if (!$("planEditor").open) planEdLoad();  // never stomp an edit in progress
+}
+
+const SLOT_MARK = { done: "✓ ", today: "▸ ", next: "▸ ", held: "⏸ " };
+const SLOT_WORD = { done: "done", today: "today", next: "next up",
+                    held: "held back", missed: "missed" };
+
+function planSlot(s, i) {
+  const open = plan.mode === "open";
+  const row = document.createElement("div");
+  row.className = "row";
+  if (!s.program) {
+    row.innerHTML = `<div class="meta" style="color: var(--muted)"><div>${cap(s.day)} · rest</div></div>`;
+    return row;
+  }
+  if (s.state === (open ? "next" : "today")) row.setAttribute("aria-current", open ? "step" : "date");
+  const jm = s.jog_min ?? (s.impact ? jogMin(s.program) : 0);
+  const bits = [SLOT_WORD[s.state], jm ? `${round1(jm)} jog min` : ""];
+  row.innerHTML = `<div class="meta"${s.state === "missed" ? ' style="color: var(--muted)"' : ""}>
+      <div>${SLOT_MARK[s.state] || ""}${open ? i + 1 + "." : cap(s.day)} · ${s.program}</div>
+      <div class="sub2">${bits.filter(Boolean).join(" · ")}</div></div>
+    <button class="btn-sm" data-a="run">▸ run</button>`;
+  const btn = row.querySelector('[data-a="run"]');
+  btn.setAttribute("aria-label", `Run ${s.program}`);
+  btn.disabled = !(s.program in programs);
+  btn.onclick = () => {
+    if (confirm(`Run "${s.program}"? The belt will start.`)) post("/api/program/run", { name: s.program });
+  };
+  return row;
+}
+
+const nextWhen = n => n.day ? cap(n.day)
+  : n.in_days === 1 ? "tomorrow" : n.in_days > 1 ? `in ${n.in_days} days` : "";
+const planOutside = () => {
+  const d = new Date(plan.start + "T00:00");  // bare ISO would parse as UTC and slip a day
+  return d > new Date()
+    ? "starts " + d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })
+    : "is complete";
+};
+
+function renderPlanCard() {
+  const t = plan.today || {}, n = plan.next;
+  const walked = (plan.sessions_today || []).reduce((a, s) => a + (s.moving_s || 0), 0);
+  $("pcWeek").textContent = plan.week ? `week ${plan.week} of ${plan.weeks}` : "";
+  const bits = [];
+  if (!plan.week) {
+    $("pcProgram").textContent = "Plan " + planOutside();
+  } else if (t.done) {
+    $("pcProgram").textContent = "✓ " + t.program;
+    bits.push("done today");
+  } else if (t.program) {
+    $("pcProgram").textContent = t.program;
+    bits.push(plan.mode === "days" ? new Date().toLocaleDateString([], { weekday: "long" }) : "",
+              t.minutes ? `≈${Math.round(t.minutes)} min` : "");
+  } else {
+    $("pcProgram").textContent = "Rest day";
+    if (n) bits.push("next: " + [nextWhen(n), n.program].filter(Boolean).join(" · "));
+  }
+  bits.push(walked ? `already walked ${fmtTime(walked)}` : "");
+  $("pcSub").textContent = bits.filter(Boolean).join(" · ");
+  $("pcStart").hidden = !t.program || !!t.done;
+  $("pcStart").disabled = t.known === false;
+  $("pcWarn").hidden = !plan.warn;
+  $("pcWarn").textContent = plan.warn ? plan.warn.text : "";
+}
+
+function renderPlan() {
+  $("planHas").hidden = $("plShift").hidden = !planReady;
+  $("plName").textContent = planReady ? plan.name : "Plan";
+  $("plWeekN").textContent = !planReady ? ""
+    : plan.week ? `week ${plan.week} of ${plan.weeks}` : planOutside();
+  $("plSpm").textContent = plan.jog_spm ? `${Math.round(plan.jog_spm)} spm jogging` : "";
+  $("plJog").firstChild.textContent = plan.jog_min != null ? round1(plan.jog_min) : "–";
+  $("plJogPlan").textContent = plan.jog_min_plan != null ? ` / ${round1(plan.jog_min_plan)} plan` : "";
+  $("plSince").firstChild.textContent =
+    plan.hours_since_impact != null ? Math.round(plan.hours_since_impact) : "–";
+  $("plFeet").firstChild.textContent = plan.feet_min != null ? (plan.feet_min / 60).toFixed(1) : "–";
+  $("plWarn").hidden = !plan.warn;
+  $("plWarn").textContent = plan.warn ? plan.warn.text : "";
+  const el = $("plWeek"), slots = plan.week_plan || [];
+  if (!slots.length) {
+    el.innerHTML = `<div class="empty">${planReady
+      ? "nothing scheduled this week" : "no plan yet — build one below"}</div>`;
+  } else {
+    el.innerHTML = "";
+    slots.forEach((s, i) => el.appendChild(planSlot(s, i)));
+  }
+  drawJog();
+  renderPlanCard();
+}
+
+function drawJog() {
+  const w = plan.weekly || [];
+  geo.jog = draw($("cJog"), w.map(x => [x.week, x.jog_min]), css("--hr"), v => Math.round(v),
+                 { xy: true, dots: true, xfmt: x => "w" + Math.round(x),
+                   name: "Jog minutes per week, completed versus planned",
+                   extra: { series: w.map(x => [x.week, x.plan_min]), color: css("--muted") } });
+}
+
+// a shift moves the very date the editor holds, so it follows even while open —
+// otherwise the next save would quietly put the plan back where it was
+const planShift = weeks =>
+  fetch("/api/plan/shift", { method: "POST", body: JSON.stringify({ weeks }) })
+    .then(loadPlan).then(() => { $("plEdStart").value = plan.start || ""; });
+$("plRepeat").onclick = () => planShift(-1);
+$("plSkip").onclick = () => planShift(1);
+$("pcStart").onclick = () => {
+  const name = plan.today && plan.today.program;
+  if (name && confirm(`Run "${name}"? The belt will start.`)) post("/api/program/run", { name });
+};
+
+function planEdOptions(sel) {
+  const chosen = sel.dataset.prog;
+  sel.innerHTML = '<option value="">— rest —</option>' +
+    Object.keys(programs).map(n => `<option>${n}</option>`).join("");
+  if (chosen && !(chosen in programs)) sel.add(new Option(`${chosen} (missing)`, chosen));
+  sel.value = chosen;
+}
+function planEdRow(name, key, open) {
+  const div = document.createElement("div");
+  div.className = "prow";
+  div.innerHTML = `<span class="day">${open ? key + 1 + "." : cap(key)}</span>
+    <select data-prog aria-label="${open ? "Session " + (key + 1) : cap(key)} program"></select>
+    <span class="jogmin" data-j></span>`;
+  const sel = div.querySelector("select");
+  sel.dataset.prog = name || "";
+  planEdOptions(sel);
+  sel.onchange = () => { sel.dataset.prog = sel.value; planEdTotals(); };
+  if (open) {
+    const del = document.createElement("button");
+    del.className = "linky";
+    del.textContent = "✕";
+    del.setAttribute("aria-label", "Remove this session");
+    del.onclick = () => { div.remove(); planEdTotals(); };
+    div.appendChild(del);
+  }
+  return div;
+}
+function planEdWeek(names) {
+  const open = $("plEdMode").value === "open";
+  const div = document.createElement("div");
+  div.innerHTML = `<div class="rlabel"><span data-n>Week</span>
+      <button class="linky" data-a="dup">dup</button>
+      <button class="linky" data-a="del" aria-label="Remove this week">✕</button>
+      <span class="jogmin" data-t></span></div>`;
+  const rows = document.createElement("div");
+  (open ? names : DAYS).forEach((_, i) =>
+    rows.appendChild(planEdRow(names[i], open ? i : DAYS[i], open)));
+  div.appendChild(rows);
+  if (open) {
+    const add = document.createElement("button");
+    add.className = "linky";
+    add.textContent = "+ session";
+    add.onclick = () => { rows.appendChild(planEdRow("", rows.children.length, true)); planEdTotals(); };
+    div.appendChild(add);
+  }
+  div.querySelector('[data-a="dup"]').onclick = () => {
+    div.after(planEdWeek([...div.querySelectorAll("select")].map(s => s.value)));
+    planEdTotals();
+  };
+  div.querySelector('[data-a="del"]').onclick = () => { div.remove(); planEdTotals(); };
+  return div;
+}
+function planEdTotals() {
+  const open = $("plEdMode").value === "open";
+  [...$("plEdWeeks").children].forEach((blk, w) => {
+    blk.querySelector("[data-n]").textContent = `Week ${w + 1}`;
+    let total = 0;
+    [...blk.querySelectorAll(".prow")].forEach((row, i) => {
+      const m = jogMin(row.querySelector("select").value);
+      total += m;
+      if (open) row.querySelector(".day").textContent = `${i + 1}.`;
+      row.querySelector("[data-j]").textContent = m ? `${round1(m)} jog min` : "";
+    });
+    blk.querySelector("[data-t]").textContent = `${round1(total)} jog min`;
+  });
+}
+function planEdFill(weeks) {
+  $("plEdWeeks").innerHTML = "";
+  for (const w of weeks) $("plEdWeeks").appendChild(planEdWeek(w));
+  planEdTotals();
+}
+function planEdLoad() {
+  $("plEdName").value = plan.name || "";
+  $("plEdStart").value = plan.start || "";
+  $("plEdMode").value = plan.mode || "days";
+  // `weeks` in the snapshot is a count, so the editor round-trips off the authored
+  // plan echoed back under `plan`
+  const weeks = plan.plan?.weeks || [];
+  planEdFill(weeks.length
+    ? weeks.map(w => Array.isArray(w) ? [...w] : DAYS.map(d => w[d] || "")) : [[]]);
+}
+$("plEdMode").onchange = () => planEdFill([...$("plEdWeeks").children]
+  .map(blk => [...blk.querySelectorAll("select")].map(s => s.value).filter(Boolean)));
+$("plEdAdd").onclick = () => {
+  $("plEdWeeks").appendChild(planEdWeek($("plEdMode").value === "open" ? [""] : []));
+  planEdTotals();
+};
+$("plEdSave").onclick = async () => {
+  const mode = $("plEdMode").value;
+  const name = $("plEdName").value.trim(), start = $("plEdStart").value;
+  const weeks = [...$("plEdWeeks").children].map(blk => {
+    const vals = [...blk.querySelectorAll("select")].map(s => s.value);
+    return mode === "open" ? vals.filter(Boolean)
+      : Object.fromEntries(DAYS.map((d, i) => [d, vals[i]]).filter(([, v]) => v));
+  });
+  if (!name || !start || !weeks.length) { alert("name, start date, and at least one week"); return; }
+  await fetch("/api/plan", { method: "POST", body: JSON.stringify({ name, start, mode, weeks }) });
+  $("planEditor").open = false;
+  loadPlan();
+};
+$("plEdDel").onclick = () => {
+  if (confirm("Remove the training plan?"))
+    fetch("/api/plan/delete", { method: "POST", body: JSON.stringify({}) }).then(loadPlan);
+};
+
 // ---- tabs & trends ----
 for (const b of document.querySelectorAll(".tabs button")) b.onclick = () => {
   document.querySelectorAll(".tabs button").forEach(x => {
@@ -1098,6 +1402,7 @@ for (const b of document.querySelectorAll(".tabs button")) b.onclick = () => {
   if (b.dataset.tab === "trends") loadTrends();
   if (b.dataset.tab === "live") drawAll();
   if (b.dataset.tab === "history") { loadWeekly(); drawReview(); }
+  if (b.dataset.tab === "plan") { drawJog(); loadPlan(); }
 };
 
 let winDays = 7;
@@ -1153,8 +1458,11 @@ async function loadTrends() {
 }
 
 progRow({ type: "hold", minutes: 5, mph: 1.5 });
-loadSessions(); loadPrograms();
-setInterval(() => { loadSessions(); if (!document.querySelector('[data-tab="trends"]').hidden) loadTrends(); }, 30000);
+loadSessions(); loadPrograms().then(loadPlan);
+setInterval(() => {
+  loadSessions(); loadPlan();
+  if (!document.querySelector('[data-tab="trends"]').hidden) loadTrends();
+}, 30000);
 
 $("foot").textContent = "milltender · " + location.host;
 
@@ -1166,8 +1474,8 @@ setInterval(() => {
   if (!document.hidden && !document.querySelector('section[data-tab="live"]').hidden)
     pollHistory();
 }, 3000); pollHistory();
-addEventListener("resize", () => { drawAll(); drawReview(); drawWeekly(); });
-matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { drawAll(); drawReview(); drawWeekly(); });
+addEventListener("resize", () => { drawAll(); drawReview(); drawWeekly(); drawJog(); });
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { drawAll(); drawReview(); drawWeekly(); drawJog(); });
 </script>
 </body>
 </html>

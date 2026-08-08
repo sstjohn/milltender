@@ -147,6 +147,27 @@ async def test_finalize_builds_sidecar_and_uploads_once(daemon, uploaded):
     assert meta["kcal"] == round(11.9)
 
 
+async def test_finalize_records_the_program_that_ran(daemon, uploaded):
+    import json
+
+    daemon.in_session = True
+    daemon.session_program = "walk-jog 8x1"
+    daemon.samples = walk_samples(120)
+    await daemon.finalize()
+    sidecar = next(iter(milltender.SESSIONS_DIR.glob("walk-*.json")))
+    assert json.loads(sidecar.read_text())["program"] == "walk-jog 8x1"
+    assert daemon.session_program is None
+
+
+async def test_a_discarded_false_start_drops_its_program_label(daemon, uploaded):
+    daemon.in_session = True
+    daemon.session_program = "walk-jog 8x1"
+    daemon.samples = walk_samples(10)  # under MIN_SESSION_S
+    await daemon.finalize()
+    # the label must not survive to be picked up by the next, unrelated walk
+    assert daemon.session_program is None
+
+
 async def test_recovery_finish_noops_while_running(daemon):
     daemon.recovery_until = time.time() + 60
     daemon.latest["state"] = milltender.ST_RUNNING

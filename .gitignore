@@ -8,6 +8,7 @@ __pycache__/
 *.log
 sessions/
 programs.json
+plan.json
 phase0/rescue-*.json
 .DS_Store
 assets/strava-app-icon.png

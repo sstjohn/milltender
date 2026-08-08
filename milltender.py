@@ -22,6 +22,7 @@ import signal
 import tempfile
 import time
 import wave
+from datetime import date, timedelta
 from pathlib import Path
 
 from aiohttp import WSMsgType, web
@@ -54,8 +55,13 @@ MIN_SESSION_S = int(os.environ.get("MIN_SESSION_S", "60"))  # discard shorter wa
 MIN_SESSION_STEPS = int(os.environ.get("MIN_SESSION_STEPS", "50"))  # ...or fewer steps
 CUE_LEAD_S = 3  # countdown before a programmed speed change: beep beep beep beeeep
 CHIME_LOCAL = os.environ.get("CHIME", "1") != "0"  # tones from the daemon host's speakers
+IMPACT_MPH = float(os.environ.get("IMPACT_MPH", "4.4"))  # at or above this is running, not walking
+IMPACT_MIN_S = 60  # a shorter excursion is ramp transit, not an impact session
+IMPACT_GAP_H = 48  # recovery the plan wants between impact sessions
 SESSIONS_DIR = Path(__file__).resolve().parent / "sessions"
 PROGRAMS_FILE = Path(__file__).resolve().parent / "programs.json"
+PLAN_FILE = Path(__file__).resolve().parent / "plan.json"
+WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 
 ST_RUNNING, ST_PAUSED = 3, 10
 END_STATES = {0, 1, 4}  # NORMAL, END, STOP
@@ -102,6 +108,59 @@ def moving_seconds(samples: list[Sample]) -> float:
     'took'; total wall clock would fold in bathroom breaks and dropouts."""
     return sum(b.t - a.t for a, b in zip(samples, samples[1:])
                if a.active and b.t - a.t < 15)
+
+
+def plan_start(plan: dict) -> date | None:
+    """The plan's first Monday. Seeding a mid-week date would otherwise roll the
+    weeks over on that weekday, which nobody means by it."""
+    try:
+        d = date.fromisoformat(plan["start"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    return d - timedelta(days=d.weekday())
+
+
+def plan_week(plan: dict, today: date) -> tuple[int, dict | list] | None:
+    """1-based week number and that week's entry; None before the plan starts and
+    once it has run out. All of the plan's date arithmetic lives here."""
+    start = plan_start(plan)
+    weeks = plan.get("weeks") or []
+    if not start or today < start:
+        return None
+    i = (today - start).days // 7
+    return (i + 1, weeks[i]) if i < len(weeks) else None
+
+
+def week_sessions(week: dict | list) -> list[tuple[str | None, str]]:
+    """A week's sessions as (weekday, program), weekday None when the plan leaves
+    them unpinned. Both scheduling modes normalise through here, so nothing
+    downstream has to know which one it is looking at."""
+    if isinstance(week, dict):
+        return [(d, week[d]) for d in WEEKDAYS if week.get(d)]
+    return [(None, p) for p in week or [] if p]
+
+
+def program_impact_min(segments: list[dict]) -> float:
+    """Minutes a program plans to spend at running speed. Ramps are transit and
+    goal segments have no fixed duration, so only holds count — which is what
+    lets the weekly target be computed from whatever programs a plan names."""
+    return sum(s.get("minutes", 0) for s in segments
+               if s.get("type", "hold") == "hold" and s.get("mph", 0) >= IMPACT_MPH)
+
+
+def session_impact(meta: dict) -> tuple[float, float | None]:
+    """Seconds a recorded walk spent at running speed, and the median cadence over
+    them. Sums real sample gaps rather than assuming 1 Hz — the archive drifts
+    either side of it and drops out altogether now and then."""
+    rows = meta.get("samples") or []
+    secs, cadences = 0.0, []
+    for a, b in zip(rows, rows[1:]):
+        if a[3] and a[1] >= IMPACT_MPH and b[0] - a[0] < 15:
+            secs += b[0] - a[0]
+            if len(a) > 5 and a[5]:
+                cadences.append(a[5])
+    cadences.sort()
+    return secs, cadences[len(cadences) // 2] if cadences else None
 
 
 def recovery_analysis(samples: list[Sample]) -> dict | None:
@@ -244,6 +303,7 @@ class Daemon:
         self.user_paused = False  # explicit UI pause: hold session open, no grace timer
         self.program_task: asyncio.Task | None = None
         self.program_status: dict | None = None  # {name, seg, total, seg_left_s}
+        self.session_program: str | None = None  # program this walk ran, for the sidecar
         self.chime_local = CHIME_LOCAL
         self._prog_cue_to: float | None = None  # speed the next segment jumps to
         self._chimed: tuple | None = None  # (segment, count) already sounded
@@ -537,6 +597,9 @@ class Daemon:
         if self.program_task and not self.program_task.done():
             self.program_task.cancel()
         samples, rr = self.samples, self.rr_events
+        # cleared here, above every early return below, or a discarded false start
+        # would leave its label to be picked up by the next walk
+        program, self.session_program = self.session_program, None
         self.samples, self.rr_events = [], []
         if len(samples) < 2:
             return
@@ -577,7 +640,7 @@ class Daemon:
         hrv_baseline = round(early[len(early) // 2], 1) if early else None
         write_atomic(fit_path.with_suffix(".json"), json.dumps({
             "start": samples[0].t, "duration_s": round(duration),
-            "moving_s": round(moving),
+            "moving_s": round(moving), "program": program,
             "dist_m": round(samples[-1].dist_m, 1), "steps": steps,
             "recovery": recovery, "hrr60": recovery and recovery["hrr60"],
             "drift_pct": drift, "hrv_baseline": hrv_baseline,
@@ -620,6 +683,10 @@ class Daemon:
         app.router.add_post("/api/program/run", self.h_program_run)
         app.router.add_post("/api/program/cancel", self.h_program_cancel)
         app.router.add_post("/api/replay", self.h_replay)
+        app.router.add_get("/api/plan", self.h_plan)
+        app.router.add_post("/api/plan", self.h_plan_save)
+        app.router.add_post("/api/plan/delete", self.h_plan_delete)
+        app.router.add_post("/api/plan/shift", self.h_plan_shift)
         app.router.add_post("/api/chime", self.h_chime)
         app.router.add_static("/sessions/", SESSIONS_DIR, show_index=False)
         runner = web.AppRunner(app, access_log=None)  # keep milltender.log readable
@@ -890,7 +957,7 @@ class Daemon:
                         "duration_s": meta.get("duration_s"),
                         "moving_s": meta.get("moving_s"), "dist_m": meta.get("dist_m"),
                         "steps": meta.get("steps"), "hr_avg": meta.get("hr_avg"),
-                        "hrr60": meta.get("hrr60"),
+                        "hrr60": meta.get("hrr60"), "program": meta.get("program"),
                         "fit": f"/sessions/{sidecar.stem}.fit"})
         return web.json_response(out)
 
@@ -1037,9 +1104,186 @@ class Daemon:
         self._start_program(f"replay {name}", segments)
         return web.json_response({"ok": True, "segments": len(segments)})
 
+    def _load_plan(self) -> dict:
+        try:
+            return json.loads(PLAN_FILE.read_text())
+        except Exception:  # noqa: BLE001
+            return {}
+
+    def _plan_snapshot(self, now: float) -> dict:
+        """Where the plan puts you today, and how the week is tracking. Completion
+        is read back out of the archive rather than recorded anywhere: if there is
+        no session file for it, it didn't happen."""
+        plan = self._load_plan()
+        weeks = plan.get("weeks") or []
+        start = plan_start(plan)
+        if not weeks or not start:
+            return {}
+        programs = self._load_programs()
+        today = date.fromtimestamp(now)
+        mode = "open" if plan.get("mode") == "open" else "days"
+
+        walks = []
+        for sidecar in sorted(SESSIONS_DIR.glob("walk-*.json")):
+            try:
+                meta = json.loads(sidecar.read_text())
+            except Exception:  # noqa: BLE001
+                continue
+            if not meta.get("start"):
+                continue
+            impact_s, spm = session_impact(meta)
+            walks.append({"t": meta["start"], "day": date.fromtimestamp(meta["start"]),
+                          "program": meta.get("program"), "impact_s": impact_s, "spm": spm,
+                          "moving_s": meta.get("moving_s") or meta.get("duration_s") or 0})
+
+        last = max((w["t"] for w in walks if w["impact_s"] >= IMPACT_MIN_S), default=None)
+        since_h = round((now - last) / 3600, 1) if last else None
+        rested = since_h is None or since_h >= IMPACT_GAP_H
+
+        def impact_min(program: str) -> float:
+            return program_impact_min(programs.get(program, []))
+
+        def window(n: int) -> tuple[date, date]:
+            return start + timedelta(days=7 * (n - 1)), start + timedelta(days=7 * n)
+
+        def slot(program: str, day: str | None = None) -> dict:
+            segs = programs.get(program, [])
+            return {"program": program, "day": day, "known": program in programs,
+                    "minutes": round(sum(s.get("minutes", 0) for s in segs)),
+                    "impact_min": round(program_impact_min(segs), 1)}
+
+        out = {"name": plan.get("name") or "plan", "start": start.isoformat(),
+               "mode": mode, "week": None, "weeks": len(weeks), "plan": plan,
+               "impact_mph": IMPACT_MPH, "hours_since_impact": since_h,
+               "weekly": [{"week": n, "plan_min": round(sum(impact_min(p) for _, p
+                                                            in week_sessions(wk)), 1),
+                           "jog_min": round(sum(w["impact_s"] for w in walks
+                                                if window(n)[0] <= w["day"] < window(n)[1])
+                                            / 60, 1)}
+                          for n, wk in enumerate(weeks, 1)]}
+
+        current = plan_week(plan, today)
+        if not current:
+            return out  # before the block opens, or past its last week
+        n, week = current
+        first, last_day = window(n)
+        got = [w for w in walks if first <= w["day"] < last_day]
+        spms = sorted(w["spm"] for w in got if w["spm"] and w["impact_s"] >= IMPACT_MIN_S)
+        out.update(week=n, jog_min=out["weekly"][n - 1]["jog_min"],
+                   jog_min_plan=out["weekly"][n - 1]["plan_min"],
+                   feet_min=round(sum(w["moving_s"] for w in got) / 60),
+                   jog_spm=spms[len(spms) // 2] if spms else None,
+                   sessions_today=[{"program": w["program"], "moving_s": w["moving_s"]}
+                                   for w in got if w["day"] == today])
+
+        week_plan, warn = [], None
+        if mode == "days":
+            for i, name in enumerate(WEEKDAYS):
+                program = week.get(name) if isinstance(week, dict) else None
+                if not program:
+                    week_plan.append({"day": name, "program": None, "state": "rest"})
+                    continue
+                on = first + timedelta(days=i)
+                hits = [w for w in got if w["day"] == on and w["program"] == program]
+                week_plan.append({
+                    "day": name, "program": program, "impact": impact_min(program) > 0,
+                    "jog_min": round(sum(w["impact_s"] for w in hits) / 60, 1) if hits else None,
+                    "state": "done" if hits else "today" if on == today
+                    else "upcoming" if on > today else "missed"})
+            here = next((s for s in week_plan if s["day"] == WEEKDAYS[today.weekday()]
+                         and s["program"]), None)
+            if here:
+                out["today"] = {**slot(here["program"], here["day"]),
+                                "done": here["state"] == "done"}
+                if here["impact"] and not rested:
+                    warn = {"kind": "too_soon", "text":
+                            f"Last impact session was {since_h:.0f} h ago; "
+                            f"the plan wants {IMPACT_GAP_H} h between them."}
+            for ahead in range(1, 15):  # may cross into the next week, so re-resolve
+                ahead_day = today + timedelta(days=ahead)
+                later = plan_week(plan, ahead_day)
+                name = WEEKDAYS[ahead_day.weekday()]
+                nxt = later[1].get(name) if later and isinstance(later[1], dict) else None
+                if nxt:
+                    out["next"] = {**slot(nxt, name), "in_days": ahead}
+                    break
+        else:
+            pool = list(got)
+            for _, program in week_sessions(week):
+                hit = next((w for w in pool if w["program"] == program), None)
+                if hit:
+                    pool.remove(hit)
+                week_plan.append({"day": None, "program": program,
+                                  "impact": impact_min(program) > 0,
+                                  "jog_min": round(hit["impact_s"] / 60, 1) if hit else None,
+                                  "state": "done" if hit else "upcoming"})
+            undone = [s for s in week_plan if s["state"] == "upcoming"]
+            # an unordered week's failure mode is handing you two hard days running,
+            # so an impact session inside the recovery window yields to a walking one
+            pick = next((s for s in undone if rested or not s["impact"]), None)
+            if pick and pick is not undone[0]:
+                undone[0]["state"] = "held"
+                warn = {"kind": "spaced", "text":
+                        f"Holding {undone[0]['program']}: {since_h:.0f} h since the last "
+                        f"impact session, short of {IMPACT_GAP_H}."}
+            pick = pick or (undone[0] if undone else None)
+            if pick:
+                pick["state"] = "next"
+                out["today"] = {**slot(pick["program"]), "done": False}
+                if pick["impact"] and not rested:
+                    warn = {"kind": "too_soon", "text":
+                            f"Last impact session was {since_h:.0f} h ago; "
+                            f"the plan wants {IMPACT_GAP_H} h between them."}
+                after = [s for s in undone if s is not pick and s["state"] == "upcoming"]
+                if after:
+                    out["next"] = slot(after[0]["program"])
+        out["week_plan"] = week_plan
+        out["warn"] = warn
+        return out
+
+    async def h_plan(self, _req: web.Request) -> web.Response:
+        return web.json_response(await asyncio.to_thread(self._plan_snapshot, time.time()))
+
+    async def h_plan_save(self, req: web.Request) -> web.Response:
+        body = await req.json()
+        mode = "open" if body.get("mode") == "open" else "days"
+        weeks = []
+        for wk in list(body.get("weeks") or [])[:52]:
+            if mode == "days":
+                weeks.append({d: str(wk[d])[:60] for d in WEEKDAYS
+                              if isinstance(wk, dict) and wk.get(d)})
+            else:
+                weeks.append([str(p)[:60] for p in list(wk or [])[:14] if p])
+        try:
+            start = date.fromisoformat(str(body.get("start")))
+        except ValueError:
+            start = None
+        if not start or not weeks:
+            raise web.HTTPBadRequest(text="a plan needs a start date and at least one week")
+        write_atomic(PLAN_FILE, json.dumps(
+            {"name": str(body.get("name") or "plan").strip()[:60] or "plan",
+             "start": start.isoformat(), "mode": mode, "weeks": weeks}, indent=1))
+        return web.json_response({"ok": True})
+
+    async def h_plan_delete(self, _req: web.Request) -> web.Response:
+        PLAN_FILE.unlink(missing_ok=True)
+        return web.json_response({"ok": True})
+
+    async def h_plan_shift(self, req: web.Request) -> web.Response:
+        plan = self._load_plan()
+        start = plan_start(plan)
+        if not start:
+            raise web.HTTPNotFound(text="no plan")
+        weeks = max(-52, min(52, round(float((await req.json()).get("weeks", 0)))))
+        plan["start"] = (start - timedelta(days=7 * weeks)).isoformat()
+        write_atomic(PLAN_FILE, json.dumps(plan, indent=1))
+        log.info("plan shifted %+d week(s): now starts %s", weeks, plan["start"])
+        return web.json_response({"ok": True, "start": plan["start"]})
+
     def _start_program(self, name: str, segments: list[dict]) -> None:
         if self.program_task and not self.program_task.done():
             raise web.HTTPConflict(text="a program is already running")
+        self.session_program = name
         self.program_task = asyncio.get_running_loop().create_task(
             self._program_loop(name, segments))
 

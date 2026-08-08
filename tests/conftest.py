@@ -43,6 +43,7 @@ class FakeRequest:
 def daemon(monkeypatch, tmp_path):
     monkeypatch.setattr(milltender, "SESSIONS_DIR", tmp_path / "sessions")
     monkeypatch.setattr(milltender, "PROGRAMS_FILE", tmp_path / "programs.json")
+    monkeypatch.setattr(milltender, "PLAN_FILE", tmp_path / "plan.json")
     milltender.SESSIONS_DIR.mkdir()
     d = milltender.Daemon()
 
