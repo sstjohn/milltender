@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>milltender — treadmill recording and control</title>
+  <script data-goatcounter="https://milltender.goatcounter.com/count"
+          async src="//gc.zgo.at/count.js"></script>
+  <meta name="description" content="A Python daemon for FitShow Bluetooth treadmills: automatic session recording, heart rate and HRV, a local dashboard, and optional Strava and Garmin uploads.">
+  <link rel="canonical" href="https://milltender.ssj.lol/">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="milltender">
+  <meta property="og:locale" content="en_US">
+  <meta property="og:title" content="milltender — treadmill recording and control">
+  <meta property="og:description" content="A Python daemon for FitShow Bluetooth treadmills: automatic session recording, heart rate and HRV, a local dashboard, and optional Strava and Garmin uploads.">
+  <meta property="og:url" content="https://milltender.ssj.lol/">
+  <meta property="og:image" content="https://milltender.ssj.lol/og.png">
+  <meta property="og:image:width" content="1120">
+  <meta property="og:image:height" content="570">
+  <meta property="og:image:alt" content="milltender live dashboard showing treadmill speed, heart rate, time, distance, steps, cadence, and calories.">
+  <meta name="twitter:card" content="summary_large_image">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareSourceCode",
+    "name": "milltender",
+    "description": "A Python daemon for FitShow Bluetooth treadmills: automatic session recording, heart rate and HRV, a local dashboard, and optional Strava and Garmin uploads.",
+    "url": "https://milltender.ssj.lol/",
+    "codeRepository": "https://github.com/sstjohn/milltender",
+    "programmingLanguage": "Python",
+    "license": "https://github.com/sstjohn/milltender/blob/main/LICENSE",
+    "author": {
+      "@type": "Person",
+      "name": "Saul St John",
+      "url": "https://ssj.lol/"
+    }
+  }
+  </script>
+  <meta name="color-scheme" content="light dark">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>milltender</h1>
+    <p>A Python daemon that tends a walking treadmill over Bluetooth.</p>
+    <nav aria-label="Project links">
+      <a href="https://github.com/sstjohn/milltender">GitHub repository</a>
+      <a href="https://ssj.lol">Back to ssj.lol</a>
+    </nav>
+  </header>
+
+  <main>
+    <section aria-labelledby="features">
+      <h2 id="features">What it handles</h2>
+      <ul>
+        <li>Automatic sessions with speed, distance, step counts, and calories.</li>
+        <li>Heart rate from a BLE monitor, plus heart-rate variability (HRV)
+          when the device supplies beat-to-beat RR intervals.</li>
+        <li>FIT export and uploads to Strava and Garmin Connect after a session,
+          when configured.</li>
+        <li>A local dashboard with live charts, speed and start/pause/stop
+          controls, fitness trends, and session history.</li>
+        <li>Interval programs with timed holds, speed ramps, heart-rate holds,
+          and step or distance goals; past sessions can be replayed as programs.</li>
+        <li>Multi-week training plans built from those programs.</li>
+      </ul>
+    </section>
+
+    <section aria-labelledby="hardware">
+      <h2 id="hardware">Hardware</h2>
+      <p>A treadmill with a FitShow Bluetooth module (advertising as
+        <code>FS-…</code>) and a nearby Mac or Linux computer with Bluetooth and
+        Python 3.11 or later. A Raspberry Pi is suitable. Developed and tested
+        on the LifeSpan TX6 Glow-Up; other FitShow pads are expected to work
+        but may need unit-calibration adjustments.</p>
+      <p>A BLE heart-rate monitor is optional. For HRV, use a chest strap that
+        provides RR intervals. Devices that broadcast heart rate without RR intervals leave HRV blank.</p>
+    </section>
+
+    <section aria-labelledby="start">
+      <h2 id="start">Getting started</h2>
+      <p>Clone the repository, create a Python virtual environment, and install
+        <code>requirements.txt</code>. Configure <code>.env</code> for your
+        setup, then run <code>python milltender.py</code> and open
+        <code>http://localhost:8321</code> for the dashboard.</p>
+      <p>Set <code>MAX_MPH</code> to a safe speed and keep the treadmill remote
+        nearby. See the <a href="https://github.com/sstjohn/milltender#readme">README</a>
+        for installation, configuration, safety notes, and upload setup.</p>
+    </section>
+  </main>
+
+  <footer>
+    <p><a href="https://github.com/sstjohn/milltender/blob/main/LICENSE">AGPL-3.0 license</a></p>
+  </footer>
+</body>
+</html>
